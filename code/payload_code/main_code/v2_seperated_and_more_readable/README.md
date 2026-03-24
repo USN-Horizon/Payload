@@ -1,4 +1,4 @@
-# Payload Radiation & Telemetry Logger (ESP32 + SX1280)
+# Payload Radiation & Telemetry Logger (ESP32-S3 + SX1280)
 
 This project logs radiation and sensor telemetry on an ESP32, stores it locally, and optionally sends compact packets over LoRa using MavLink protocall.
 
