@@ -1,0 +1,94 @@
+// Component test: SX1280 LoRa Radio
+//
+// Verifies SPI wiring, chip presence, configuration, and a live TX.
+//
+// PASS criteria:
+//   - radio.begin() returns RADIOLIB_ERR_NONE  (SPI comms + chip-ID check)
+//   - All config calls succeed
+//   - transmit() returns RADIOLIB_ERR_NONE
+//
+// Upload:  pio run -e test_lora -t upload
+// Monitor: pio device monitor -e test_lora
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <RadioLib.h>
+
+// Pin map – must match Config.hpp
+static constexpr int PIN_SPI_MOSI = 4;
+static constexpr int PIN_SPI_SCK  = 5;
+static constexpr int PIN_SPI_MISO = 6;
+static constexpr int LORA_NSS     = 16;
+static constexpr int LORA_DIO1    = 26;
+static constexpr int LORA_RST     = 27;
+static constexpr int LORA_BUSY    = 25;
+
+static void result(const char* label, bool pass) {
+    Serial.printf("  [%s] %s\n", pass ? "PASS" : "FAIL", label);
+}
+
+void setup() {
+    Serial.begin(115200);
+    delay(500);
+
+    Serial.println();
+    Serial.println("========================================");
+    Serial.println("  COMPONENT TEST: SX1280 LoRa Radio");
+    Serial.println("========================================");
+
+    SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
+    result("SPI bus initialized (SCK=5, MISO=6, MOSI=4)", true);
+
+    Module* mod = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY,
+                             SPI, SPISettings(8000000, MSBFIRST, SPI_MODE0));
+    SX1280 radio(mod);
+
+    // begin() does SPI transactions and verifies the chip ID
+    int state = radio.begin();
+    Serial.printf("  [INFO] radio.begin() = %d  (0 = OK)\n", state);
+    bool initOk = (state == RADIOLIB_ERR_NONE);
+    result("radio.begin() – SPI comms + chip ID", initOk);
+
+    if (!initOk) {
+        Serial.println("  [HINT] Check: NSS=16, DIO1=26, RST=27, BUSY=25, power to module.");
+        goto done;
+    }
+
+    {
+        bool cfgOk = true;
+        int s;
+
+        s = radio.setFrequency(2400.0f);
+        if (s != RADIOLIB_ERR_NONE) { Serial.printf("  [FAIL] setFrequency: %d\n", s); cfgOk = false; }
+
+        s = radio.setBandwidth(812.5f);
+        if (s != RADIOLIB_ERR_NONE) { Serial.printf("  [FAIL] setBandwidth: %d\n", s); cfgOk = false; }
+
+        s = radio.setSpreadingFactor(7);
+        if (s != RADIOLIB_ERR_NONE) { Serial.printf("  [FAIL] setSpreadingFactor: %d\n", s); cfgOk = false; }
+
+        s = radio.setCodingRate(5);
+        if (s != RADIOLIB_ERR_NONE) { Serial.printf("  [FAIL] setCodingRate: %d\n", s); cfgOk = false; }
+
+        s = radio.setOutputPower(14);
+        if (s != RADIOLIB_ERR_NONE) { Serial.printf("  [FAIL] setOutputPower: %d\n", s); cfgOk = false; }
+
+        result("Radio configuration (2400 MHz / 812.5 kHz BW / SF7 / CR4/5 / 14 dBm)", cfgOk);
+
+        if (cfgOk) {
+            String msg = "LORA_TEST";
+            int txState = radio.transmit(msg);
+            Serial.printf("  [INFO] transmit() = %d  (0 = OK)\n", txState);
+            result("Transmit test packet", txState == RADIOLIB_ERR_NONE);
+        }
+    }
+
+done:
+    Serial.println("========================================");
+    Serial.println("  TEST COMPLETE  –  restarting in 5 s");
+    Serial.println("========================================");
+    delay(5000);
+    ESP.restart();
+}
+
+void loop() {}
