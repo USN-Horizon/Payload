@@ -55,7 +55,7 @@ void setup() {
     result("IMU begin() – I2C comms + chip ID", initOk);
 
     if (!initOk) {
-        Serial.println("  [HINT] Check: I2C address (default 0x68), SDA=7, SCL=15, power.");
+        Serial.println("  [HINT] Check: I2C address (default 0x76), SDA=7, SCL=15, power.");
         goto done;
     }
 

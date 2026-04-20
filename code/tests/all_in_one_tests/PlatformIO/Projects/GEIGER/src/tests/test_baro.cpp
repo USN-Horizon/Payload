@@ -16,7 +16,7 @@
 
 static constexpr int     PIN_I2C_SDA = 7;
 static constexpr int     PIN_I2C_SCL = 15;
-static constexpr uint8_t BMP_ADDR    = 0x77;  // try 0x76 if this fails
+static constexpr uint8_t BMP_ADDR    = 0x76;  // try 0x76 if this fails
 
 static void result(const char* label, bool pass) {
     Serial.printf("  [%s] %s\n", pass ? "PASS" : "FAIL", label);

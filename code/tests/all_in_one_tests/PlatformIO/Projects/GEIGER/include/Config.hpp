@@ -54,10 +54,10 @@ constexpr int GEIGER_PIN = 17;  // GPIO connected to the Geiger pulse output.
 #endif
 
 #if LoRa
-constexpr int LORA_NSS   = 16;  // LoRa chip-select / NSS pin.
-constexpr int LORA_DIO1  = 26;  // LoRa DIO1 interrupt pin.
-constexpr int LORA_RST   = 27;  // LoRa reset pin.
-constexpr int LORA_BUSY  = 25;  // LoRa busy pin.
+constexpr int LORA_NSS   = 16;  // LoRa chip-select / NSS pin. (IF8)
+constexpr int LORA_DIO1  = 8;   // LoRa DIO1 interrupt pin.   (IF11)
+constexpr int LORA_RST   = 9;   // LoRa reset pin.            (IF13)
+constexpr int LORA_BUSY  = 18;  // LoRa busy pin.             (IF10)
 #endif
 
 #if SDKort

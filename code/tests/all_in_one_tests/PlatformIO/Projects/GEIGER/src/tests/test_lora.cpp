@@ -19,9 +19,9 @@ static constexpr int PIN_SPI_MOSI = 4;
 static constexpr int PIN_SPI_SCK  = 5;
 static constexpr int PIN_SPI_MISO = 6;
 static constexpr int LORA_NSS     = 16;
-static constexpr int LORA_DIO1    = 26;
-static constexpr int LORA_RST     = 27;
-static constexpr int LORA_BUSY    = 25;
+static constexpr int LORA_DIO1    = 8;
+static constexpr int LORA_RST     = 9;
+static constexpr int LORA_BUSY    = 18;
 
 static void result(const char* label, bool pass) {
     Serial.printf("  [%s] %s\n", pass ? "PASS" : "FAIL", label);
@@ -39,8 +39,37 @@ void setup() {
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
     result("SPI bus initialized (SCK=5, MISO=6, MOSI=4)", true);
 
+    // Manual reset pulse before handing control to RadioLib
+    pinMode(LORA_NSS,  OUTPUT); digitalWrite(LORA_NSS,  HIGH);
+    pinMode(LORA_RST,  OUTPUT); digitalWrite(LORA_RST,  LOW);
+    delay(10);
+    digitalWrite(LORA_RST, HIGH);
+    delay(20);
+
+    // Check BUSY: SX1280 must go LOW within ~3 ms of reset release
+    pinMode(LORA_BUSY, INPUT);
+    uint32_t t0 = millis();
+    while (digitalRead(LORA_BUSY) == HIGH && millis() - t0 < 100) {}
+    bool busyOk = (digitalRead(LORA_BUSY) == LOW);
+    Serial.printf("  [INFO] BUSY after reset = %s (waited %lu ms)\n",
+                  busyOk ? "LOW (OK)" : "HIGH (stuck!)", millis() - t0);
+    result("BUSY pin LOW after reset", busyOk);
+
+    // Raw SPI loopback: read one byte with NSS asserted – should not be 0x00 or 0xFF
+    {
+        SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(LORA_NSS, LOW);
+        delayMicroseconds(2);
+        uint8_t b = SPI.transfer(0xC0);  // GetStatus opcode
+        SPI.transfer(0x00);
+        uint8_t status = SPI.transfer(0x00);
+        digitalWrite(LORA_NSS, HIGH);
+        SPI.endTransaction();
+        Serial.printf("  [INFO] Raw SPI GetStatus response: 0x%02X (0x00/0xFF = no comms)\n", status);
+    }
+
     Module* mod = new Module(LORA_NSS, LORA_DIO1, LORA_RST, LORA_BUSY,
-                             SPI, SPISettings(8000000, MSBFIRST, SPI_MODE0));
+                             SPI, SPISettings(2000000, MSBFIRST, SPI_MODE0));
     SX1280 radio(mod);
 
     // begin() does SPI transactions and verifies the chip ID
@@ -50,7 +79,7 @@ void setup() {
     result("radio.begin() – SPI comms + chip ID", initOk);
 
     if (!initOk) {
-        Serial.println("  [HINT] Check: NSS=16, DIO1=26, RST=27, BUSY=25, power to module.");
+        Serial.println("  [HINT] Check: NSS=16(IF8), DIO1=8(IF11), RST=9(IF13), BUSY=18(IF10), power to module.");
         goto done;
     }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 // Feature switches: set to 1 to enable, 0 to disable.
-#define LoRa           0   // Enable LoRa radio support and packet transmission.
+#define LoRa           1   // Enable LoRa radio support and packet transmission.
 #define SDKort         1   // Enable SD card logging support.
 #define Geiger         1   // Enable the Geiger counter input and counting logic.
 #define flashmemori    1   // Mirror logs to onboard flash using LittleFS.

@@ -12,7 +12,7 @@ static bool imuOk = false;
 #if Baro_Sensor
 Adafruit_BMP3XX bmp;
 static bool baroOk = false;
-static const uint8_t BMP390_ADDR = 0x77;
+static const uint8_t BMP390_ADDR = 0x76;
 #endif
 
 #if Mag_Sensor
