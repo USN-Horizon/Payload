@@ -15,13 +15,15 @@
 #include <RadioLib.h>
 
 // Pin map – must match Config.hpp
-static constexpr int PIN_SPI_MOSI = 4;
-static constexpr int PIN_SPI_SCK  = 5;
-static constexpr int PIN_SPI_MISO = 6;
-static constexpr int LORA_NSS     = 16;
-static constexpr int LORA_DIO1    = 8;
-static constexpr int LORA_RST     = 9;
-static constexpr int LORA_BUSY    = 18;
+static constexpr int PIN_SPI_MOSI  = 4;
+static constexpr int PIN_SPI_SCK   = 5;
+static constexpr int PIN_SPI_MISO  = 6;
+static constexpr int LORA_NSS      = 9;   // IF13 CS_rf
+static constexpr int LORA_POWER_EN = 10;  // IF14 power enable
+static constexpr int LORA_DIO1     = 11;  // IF15 CXT
+static constexpr int LORA_DIO2     = 12;  // IF16 CrX
+static constexpr int LORA_BUSY     = 13;  // IF17 rf_busy
+static constexpr int LORA_RST      = 14;  // IF18 rf_rst
 
 static void result(const char* label, bool pass) {
     Serial.printf("  [%s] %s\n", pass ? "PASS" : "FAIL", label);
@@ -38,6 +40,11 @@ void setup() {
 
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
     result("SPI bus initialized (SCK=5, MISO=6, MOSI=4)", true);
+
+    // Enable power to LoRa module
+    pinMode(LORA_POWER_EN, OUTPUT); digitalWrite(LORA_POWER_EN, HIGH);
+    delay(10);
+    result("LoRa power enabled (GPIO10/IF14)", true);
 
     // Manual reset pulse before handing control to RadioLib
     pinMode(LORA_NSS,  OUTPUT); digitalWrite(LORA_NSS,  HIGH);
@@ -79,7 +86,7 @@ void setup() {
     result("radio.begin() – SPI comms + chip ID", initOk);
 
     if (!initOk) {
-        Serial.println("  [HINT] Check: NSS=16(IF8), DIO1=8(IF11), RST=9(IF13), BUSY=18(IF10), power to module.");
+        Serial.println("  [HINT] Check: NSS=9(IF13), DIO1=11(IF15), RST=14(IF18), BUSY=13(IF17), PWR_EN=10(IF14).");
         goto done;
     }
 
@@ -99,16 +106,35 @@ void setup() {
         s = radio.setCodingRate(5);
         if (s != RADIOLIB_ERR_NONE) { Serial.printf("  [FAIL] setCodingRate: %d\n", s); cfgOk = false; }
 
-        s = radio.setOutputPower(14);
+        s = radio.setOutputPower(13);
         if (s != RADIOLIB_ERR_NONE) { Serial.printf("  [FAIL] setOutputPower: %d\n", s); cfgOk = false; }
 
-        result("Radio configuration (2400 MHz / 812.5 kHz BW / SF7 / CR4/5 / 14 dBm)", cfgOk);
+        result("Radio configuration (2400 MHz / 812.5 kHz BW / SF7 / CR4/5 / 13 dBm)", cfgOk);
 
         if (cfgOk) {
+            // Check DIO1 state before TX – should be LOW when idle
+            pinMode(LORA_DIO1, INPUT);
+            Serial.printf("  [INFO] DIO1 (GPIO11) before TX = %s\n",
+                          digitalRead(LORA_DIO1) ? "HIGH" : "LOW");
+
+            // Start non-blocking TX, poll for completion manually
             String msg = "LORA_TEST";
-            int txState = radio.transmit(msg);
-            Serial.printf("  [INFO] transmit() = %d  (0 = OK)\n", txState);
-            result("Transmit test packet", txState == RADIOLIB_ERR_NONE);
+            int txState = radio.startTransmit(msg);
+            Serial.printf("  [INFO] startTransmit() = %d  (0 = OK)\n", txState);
+
+            if (txState == RADIOLIB_ERR_NONE) {
+                uint32_t tTx = millis();
+                while (digitalRead(LORA_BUSY) == HIGH && millis() - tTx < 2000) {}
+                bool txDone = (digitalRead(LORA_BUSY) == LOW);
+                Serial.printf("  [INFO] TX BUSY cleared = %s (waited %lu ms)\n",
+                              txDone ? "YES" : "NO (timeout)", millis() - tTx);
+                Serial.printf("  [INFO] DIO1 after TX    = %s\n",
+                              digitalRead(LORA_DIO1) ? "HIGH (IRQ)" : "LOW");
+                radio.finishTransmit();
+                result("Transmit test packet", txDone);
+            } else {
+                result("Transmit test packet", false);
+            }
         }
     }
 

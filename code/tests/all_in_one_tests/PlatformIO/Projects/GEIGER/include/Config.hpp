@@ -1,7 +1,7 @@
 #pragma once
 
 // Feature switches: set to 1 to enable, 0 to disable.
-#define LoRa           0   // Enable LoRa radio support and packet transmission.
+#define LoRa           1   // Enable LoRa radio support and packet transmission.
 #define SDKort         1   // Enable SD card logging support.
 #define Geiger         1   // Enable the Geiger counter input and counting logic.
 #define flashmemori    1   // Mirror logs to onboard flash using LittleFS.
@@ -54,10 +54,12 @@ constexpr int GEIGER_PIN = 17;  // GPIO connected to the Geiger pulse output.
 #endif
 
 #if LoRa
-constexpr int LORA_NSS   = 16;  // LoRa chip-select / NSS pin. (IF8)
-constexpr int LORA_DIO1  = 8;   // LoRa DIO1 interrupt pin.   (IF11)
-constexpr int LORA_RST   = 9;   // LoRa reset pin.            (IF13)
-constexpr int LORA_BUSY  = 18;  // LoRa busy pin.             (IF10)
+constexpr int LORA_POWER_EN = 10;  // LoRa power enable.         (IF14)
+constexpr int LORA_NSS      = 9;   // LoRa chip-select / NSS.    (IF13)
+constexpr int LORA_DIO1     = 11;  // LoRa DIO1 / CXT interrupt. (IF15)
+constexpr int LORA_DIO2     = 12;  // LoRa DIO2 / CrX.           (IF16)
+constexpr int LORA_BUSY     = 13;  // LoRa busy pin.             (IF17)
+constexpr int LORA_RST      = 14;  // LoRa reset pin.            (IF18)
 #endif
 
 #if SDKort
@@ -69,7 +71,7 @@ constexpr float   LORA_FREQ_MHZ    = 2400.0;  // LoRa carrier frequency in MHz.
 constexpr float   LORA_BW_KHZ      = 812.5;   // LoRa bandwidth in kHz.
 constexpr uint8_t LORA_SF          = 7;       // LoRa spreading factor.
 constexpr uint8_t LORA_CR          = 5;       // LoRa coding rate denominator (5 = 4/5).
-constexpr int8_t  LORA_TX_PWR      = 14;      // LoRa transmit power in dBm.
+constexpr int8_t  LORA_TX_PWR      = 13;      // LoRa transmit power in dBm. (SX1280 max is +13 dBm)
 constexpr uint8_t MAX_LORA_RETRIES = 3;       // Maximum retry count for failed LoRa sends.
 constexpr uint16_t BASE_BACKOFF_MS = 50;      // Base delay before retrying a failed LoRa send.
 #endif

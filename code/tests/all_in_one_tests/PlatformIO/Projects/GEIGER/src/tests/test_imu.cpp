@@ -12,28 +12,18 @@
 // Monitor: pio device monitor -e test_imu
 
 #include <Arduino.h>
-#include <Wire.h>
+#include <SPI.h>
 #include <ICM45686.h>
 
-static constexpr int PIN_I2C_SDA = 7;
-static constexpr int PIN_I2C_SCL = 15;
+static constexpr int PIN_SPI_SCK  = 5;
+static constexpr int PIN_SPI_MISO = 6;
+static constexpr int PIN_SPI_MOSI = 4;
+static constexpr int IMU_CS       = 16;  // IF8
 
 static void result(const char* label, bool pass) {
     Serial.printf("  [%s] %s\n", pass ? "PASS" : "FAIL", label);
 }
 
-static void i2cScan() {
-    Serial.println("  [INFO] I2C scan:");
-    bool found = false;
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
-            Serial.printf("         0x%02X\n", addr);
-            found = true;
-        }
-    }
-    if (!found) Serial.println("         (no devices found)");
-}
 
 void setup() {
     Serial.begin(115200);
@@ -44,18 +34,17 @@ void setup() {
     Serial.println("  COMPONENT TEST: ICM-45686 IMU");
     Serial.println("========================================");
 
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
-    result("I2C bus initialized (SDA=7, SCL=15)", true);
-    i2cScan();
+    SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
+    result("SPI bus initialized (SCK=5, MISO=6, MOSI=4, CS=16/IF8)", true);
 
-    ICM456xx imu(Wire, 0);
+    ICM456xx imu(SPI, IMU_CS);
     int initState = imu.begin();
     Serial.printf("  [INFO] imu.begin() = %d  (0 = OK)\n", initState);
     bool initOk = (initState == 0);
     result("IMU begin() – I2C comms + chip ID", initOk);
 
     if (!initOk) {
-        Serial.println("  [HINT] Check: I2C address (default 0x76), SDA=7, SCL=15, power.");
+        Serial.println("  [HINT] Check: SPI wiring SCK=5, MISO=6, MOSI=4, CS=16(IF8), power.");
         goto done;
     }
 
