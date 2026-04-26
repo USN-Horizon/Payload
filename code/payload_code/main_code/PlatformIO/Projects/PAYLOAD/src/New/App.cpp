@@ -54,7 +54,9 @@ void App::begin() {
   attachInterrupt(PIN_GEIGER_2, geigerCh2Isr, RISING);
 #endif
 
-  storage_.begin(runId);
+  // Bring SPI peripherals up FIRST.  SD.begin() can leave the bus in a state
+  // the InvenSense IMU driver cannot recover from, so we initialise the
+  // sensors and the radio while the bus is still clean, and probe SD last.
   sensors_.begin();
 
 #if USE_LORA
@@ -65,6 +67,8 @@ void App::begin() {
 #endif
   }
 #endif
+
+  storage_.begin(runId);
 
   uint32_t now = millis();
   lastTxCycleMs_    = now;

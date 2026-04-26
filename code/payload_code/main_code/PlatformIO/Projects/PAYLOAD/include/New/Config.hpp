@@ -19,17 +19,17 @@
 //  boots and continues to log whatever sensors are present.
 // -----------------------------------------------------------------------------
 #define USE_SERIAL     1   // Print status/debug to USB CDC.
-#define PRINT_TX       1   // Print every MAVLink frame as it goes out the radio.
-#define PRINT_TX_HEX   1   // Also dump raw bytes (hex) of every transmitted frame.
-#define USE_LORA       1   // SX1280 transmitter + MAVLink frames.
+#define PRINT_TX       0   // Print every MAVLink frame as it goes out the radio.
+#define PRINT_TX_HEX   0   // Also dump raw bytes (hex) of every transmitted frame.
+#define USE_LORA       0   // SX1280 transmitter + MAVLink frames.
 #define USE_SD         1   // microSD card on PIN_SD_CS.
 #define USE_FLASH      1   // LittleFS log mirror in onboard flash.
 #define USE_GEIGER     1   // Geiger pulse counter (CRD1 + CRD2).
 #define USE_IMU        1   // ICM-45686 accelerometer + gyroscope.
 #define USE_BARO       1   // BMP388 barometer.
 #define USE_MAG        1   // BMM350 magnetometer.
-#define USE_LORA_TEMP  1   // TMP1075 temperature sensor next to LoRa module.
-#define USE_LORA_VOLT  1   // DAC43401 voltage setting that drives LoRa TX power.
+#define USE_LORA_TEMP  0   // TMP1075 temperature sensor next to LoRa module.
+#define USE_LORA_VOLT  0   // DAC43401 voltage setting that drives LoRa TX power.
 
 // -----------------------------------------------------------------------------
 //  Conditional library includes.

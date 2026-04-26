@@ -32,6 +32,20 @@ bool Storage::begin(uint32_t run) {
 #if USE_FLASH
   flashOk_ = LittleFS.begin(true);
   if (flashOk_) {
+    // If the partition is essentially full, creating a new log file can
+    // fail (and on some LittleFS builds that path divides by free-blocks
+    // and panics).  Auto-wipe before we get there.
+    const size_t total = LittleFS.totalBytes();
+    const size_t used  = LittleFS.usedBytes();
+    if (total > 0 && used * 100 / total >= 90) {
+#if USE_SERIAL
+      Serial.printf("[STOR] LittleFS %u%% full, auto-wiping\n",
+                    static_cast<unsigned>(used * 100 / total));
+#endif
+      flashDeleteRecursive_(FLASH_LOG_DIR);
+      LittleFS.mkdir(FLASH_LOG_DIR);
+    }
+
     LittleFS.mkdir(FLASH_LOG_DIR);
     char buf[48];
     snprintf(buf, sizeof(buf), "%s/run_%06lu.csv", FLASH_LOG_DIR,

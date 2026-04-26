@@ -62,13 +62,23 @@ void setup() {
         result("Read sensor registers", readOk);
 
         if (readOk) {
-            float ax = data.accel_data[0];
-            float ay = data.accel_data[1];
-            float az = data.accel_data[2];
-            float gx = data.gyro_data[0];
-            float gy = data.gyro_data[1];
-            float gz = data.gyro_data[2];
+            // accel_data / gyro_data are RAW int16 counts at the configured
+            // FSR (NOT float g / dps).  Convert with the same scaling used
+            // by Sensors.cpp in the new firmware.
+            constexpr float ACCEL_FSR_G  = 16.0f;     // matches startAccel(100, 16)
+            constexpr float GYRO_FSR_DPS = 2000.0f;   // matches startGyro(100, 2000)
+            constexpr float ACCEL_LSB_PER_G   = 32768.0f / ACCEL_FSR_G;   // ≈ 2048
+            constexpr float GYRO_LSB_PER_DPS  = 32768.0f / GYRO_FSR_DPS;  // ≈ 16.384
 
+            float ax = data.accel_data[0] / ACCEL_LSB_PER_G;
+            float ay = data.accel_data[1] / ACCEL_LSB_PER_G;
+            float az = data.accel_data[2] / ACCEL_LSB_PER_G;
+            float gx = data.gyro_data[0]  / GYRO_LSB_PER_DPS;
+            float gy = data.gyro_data[1]  / GYRO_LSB_PER_DPS;
+            float gz = data.gyro_data[2]  / GYRO_LSB_PER_DPS;
+
+            Serial.printf("  [INFO] Accel raw  X=%d Y=%d Z=%d\n",
+                          data.accel_data[0], data.accel_data[1], data.accel_data[2]);
             Serial.printf("  [INFO] Accel  X=%.3f g   Y=%.3f g   Z=%.3f g\n", ax, ay, az);
             Serial.printf("  [INFO] Gyro   X=%.2f dps  Y=%.2f dps  Z=%.2f dps\n", gx, gy, gz);
 

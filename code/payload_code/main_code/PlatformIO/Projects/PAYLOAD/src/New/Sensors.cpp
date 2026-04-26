@@ -70,7 +70,18 @@ bool Sensors::begin() {
   bool any = false;
 
 #if USE_IMU
-  imuOk_ = (s_imu.begin() == 0);
+  // The ICM-45686 needs ~50-100 ms of POR settling before SPI works, and
+  // its begin() does not retry internally.  Give the chip time and try
+  // a few times before declaring it dead.
+  delay(150);
+  imuOk_ = false;
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    if (s_imu.begin() == 0) { imuOk_ = true; break; }
+#if USE_SERIAL
+    Serial.printf("[SENS] ICM-45686 begin() attempt %d failed\n", attempt + 1);
+#endif
+    delay(50);
+  }
   if (imuOk_) {
     s_imu.startAccel(100, 16);    // 100 Hz, ±16 g.
     s_imu.startGyro(100, 2000);   // 100 Hz, ±2000 dps.
@@ -80,7 +91,7 @@ bool Sensors::begin() {
     any = true;
   } else {
 #if USE_SERIAL
-    Serial.println("[SENS] ICM-45686 init failed");
+    Serial.println("[SENS] ICM-45686 init failed (after retries)");
 #endif
   }
 #endif
