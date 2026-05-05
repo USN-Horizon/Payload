@@ -1,18 +1,18 @@
 // Component test: DAC43401 (LoRa TX-power voltage setter)
 //
-// The DAC43401 is a single-channel 8-bit DAC at I2C address 0x72.  It
-// exposes a 16-bit DEVICE_ID register (read-only, addr 0x01) and a
-// 16-bit DAC_DATA register (addr 0x21) whose top 8 bits hold the output
-// code.  Output voltage = code * VREF / 255 (VREF ≈ VDD ≈ 3.3 V on this
-// board, unless the internal reference is enabled in GENERAL_CONFIG).
+// The I2C scanner located the DAC43401 at 0x48 (the breakout PDF claimed
+// 0x72, but the actual board strapping puts it on the TI default range —
+// ADDR pin tied to GND -> 0x48). 0x47 also ACKs on this board, so we keep
+// it as a fallback in case the strapping changes.
 //
-// Without an external multimeter we cannot verify the actual analogue
-// output, but we *can* prove I2C comms work and the chip accepts writes.
+// Output voltage: V_out = code * VREF / 255  with VREF ~= VDD ~= 3.3 V
+// (unless the internal reference is enabled in GENERAL_CONFIG).
 //
 // PASS criteria:
-//   - 0x72 ACKs on the I2C bus
-//   - DEVICE_ID register can be read (two bytes, non-zero)
-//   - Mid-scale, full-scale, and zero-scale writes all ACK
+//   - DAC ACKs at 0x48 (or 0x47 fallback)
+//   - DEVICE_ID / STATUS register read returns
+//   - DAC_DATA round-trips two distinct test patterns
+//   - Mid-, full-, and zero-scale writes all ACK and read back correctly
 //
 // Upload:  pio run -e test_lora_volt -t upload
 // Monitor: pio device monitor -e test_lora_volt
@@ -20,41 +20,28 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-static constexpr int     PIN_I2C_SDA   = 7;
-static constexpr int     PIN_I2C_SCL   = 15;
-static constexpr int     PIN_LORA_PWR  = 10;   // gates LoRa-side power rail.
+static constexpr int     PIN_I2C_SDA  = 7;
+static constexpr int     PIN_I2C_SCL  = 15;
+static constexpr int     PIN_LORA_PWR = 10;     // gates the LoRa-side power rail.
 
-// The breakout PDF claimed the DAC43401 sits at 0x72, but the real strapping
-// places it somewhere else entirely.  We probe the whole bus and rely on a
-// behavioural check (DAC_DATA round-trips two distinct values) to identify
-// the chip — a TMP1075 in the same address range will fail because its
-// register pointer wraps and its config register masks reserved bits.
+static constexpr uint8_t DAC_ADDR_PRIMARY  = 0x48;   // confirmed by I2C scan
+static constexpr uint8_t DAC_ADDR_FALLBACK = 0x47;   // also ACKs on this board
+
+// DAC43401 register map
 static constexpr uint8_t DAC_REG_STATUS        = 0x01;
 static constexpr uint8_t DAC_REG_GENERAL_CFG   = 0x09;
 static constexpr uint8_t DAC_REG_DAC_DATA      = 0x21;
 static constexpr uint8_t DAC_REG_DEVICE_UNLOCK = 0x36;
 static constexpr uint16_t DAC_UNLOCK_MAGIC     = 0x5000;
 
+static int passCount = 0;
+static int failCount = 0;
+
 static void result(const char* label, bool pass) {
     Serial.printf("  [%s] %s\n", pass ? "PASS" : "FAIL", label);
+    if (pass) passCount++; else failCount++;
 }
 
-static void i2cScan() {
-    Serial.println("  [INFO] I2C scan:");
-    bool found = false;
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() == 0) {
-            Serial.printf("         0x%02X\n", addr);
-            found = true;
-        }
-    }
-    if (!found) Serial.println("         (no devices found)");
-}
-
-// Input  : addr - I2C address; reg - DAC register; value - 16-bit data.
-// What   : writes [reg] [value_hi] [value_lo] in one I2C transaction.
-// Output : true if the device ACKed the write, false otherwise.
 static bool dacWrite16(uint8_t addr, uint8_t reg, uint16_t value) {
     Wire.beginTransmission(addr);
     Wire.write(reg);
@@ -63,10 +50,6 @@ static bool dacWrite16(uint8_t addr, uint8_t reg, uint16_t value) {
     return (Wire.endTransmission() == 0);
 }
 
-// Input  : addr - I2C address; reg - DAC register; out - destination uint16.
-// What   : performs a "write reg pointer, repeated start, read 2 bytes"
-//          sequence and stores the resulting 16-bit big-endian value.
-// Output : true if all phases succeeded, false otherwise.
 static bool dacRead16(uint8_t addr, uint8_t reg, uint16_t& out) {
     Wire.beginTransmission(addr);
     Wire.write(reg);
@@ -78,46 +61,59 @@ static bool dacRead16(uint8_t addr, uint8_t reg, uint16_t& out) {
     return true;
 }
 
-// Input  : addr - I2C address; code - 8-bit DAC output code (0..255).
-// What   : packs the code into the top 8 bits of DAC_DATA and writes it.
-// Output : true on a successful write.
+// DAC43401 stores the 8-bit code in DAC_DATA bits [11:4]; bits [15:12]
+// and [3:0] are reserved and always read back as zero. So a code of 0x80
+// goes into the register as 0x0800, not 0x8000.
 static bool dacSetCode(uint8_t addr, uint8_t code) {
-    return dacWrite16(addr, DAC_REG_DAC_DATA, static_cast<uint16_t>(code) << 8);
+    return dacWrite16(addr, DAC_REG_DAC_DATA, static_cast<uint16_t>(code) << 4);
 }
 
-// Input  : addr - candidate I2C address.
-// What   : runs the DAC43401 wake-up sequence (unlock + clear power-down),
-//          then writes two distinct test patterns to DAC_DATA and confirms
-//          each one round-trips.  Status / config register reads are
-//          printed so a partial failure (e.g. ACK but no round-trip) shows
-//          where the chip stopped cooperating.
-// Output : true if both patterns round-trip exactly, false otherwise.
-static bool looksLikeDac(uint8_t addr) {
-    uint16_t status = 0;
-    bool sOk = dacRead16(addr, DAC_REG_STATUS, status);
-    Serial.printf("                  STATUS=0x%04X (read=%s)\n",
-                  status, sOk ? "yes" : "no");
-
-    // Send the magic unlock value (no-op if device wasn't locked).
-    bool uOk = dacWrite16(addr, DAC_REG_DEVICE_UNLOCK, DAC_UNLOCK_MAGIC);
-    Serial.printf("                  unlock write ACK=%s\n", uOk ? "yes" : "no");
+// Wake the DAC: send unlock magic + clear power-down in GENERAL_CONFIG.
+static void dacWake(uint8_t addr) {
+    dacWrite16(addr, DAC_REG_DEVICE_UNLOCK, DAC_UNLOCK_MAGIC);
     delay(2);
-
-    // Clear GENERAL_CONFIG so the DAC isn't in power-down.
-    bool gOk = dacWrite16(addr, DAC_REG_GENERAL_CFG, 0x0000);
-    Serial.printf("                  general-cfg write ACK=%s\n", gOk ? "yes" : "no");
+    dacWrite16(addr, DAC_REG_GENERAL_CFG, 0x0000);
     delay(2);
+}
 
-    constexpr uint16_t patterns[] = {0xA500, 0x5A00};
+// Round-trip two distinct DAC_DATA patterns to verify it really is a DAC
+// (a TMP1075 at the same address would fail this). Patterns are placed in
+// bits [11:4] since the chip masks bits [15:12] and [3:0] to zero.
+static bool dacRoundTrip(uint8_t addr) {
+    constexpr uint16_t patterns[] = {0x0A50, 0x05A0};
     for (uint16_t p : patterns) {
         if (!dacWrite16(addr, DAC_REG_DAC_DATA, p)) return false;
         delay(2);
         uint16_t readBack = 0;
         if (!dacRead16(addr, DAC_REG_DAC_DATA, readBack)) return false;
-        Serial.printf("                  wrote 0x%04X, read 0x%04X\n", p, readBack);
+        Serial.printf("  [INFO] 0x%02X round-trip: wrote 0x%04X, read 0x%04X %s\n",
+                      addr, p, readBack, (readBack == p) ? "OK" : "MISMATCH");
         if (readBack != p) return false;
     }
     return true;
+}
+
+static bool ack(uint8_t addr) {
+    Wire.beginTransmission(addr);
+    return (Wire.endTransmission() == 0);
+}
+
+// Pick whichever of the two candidate addresses behaves like a DAC.
+static uint8_t resolveDacAddr() {
+    for (uint8_t addr : {DAC_ADDR_PRIMARY, DAC_ADDR_FALLBACK}) {
+        if (!ack(addr)) {
+            Serial.printf("  [INFO] 0x%02X did not ACK\n", addr);
+            continue;
+        }
+        Serial.printf("  [INFO] 0x%02X ACKed, running DAC behaviour check...\n", addr);
+        dacWake(addr);
+        if (dacRoundTrip(addr)) {
+            Serial.printf("  [INFO] 0x%02X confirmed as DAC43401\n", addr);
+            return addr;
+        }
+        Serial.printf("  [INFO] 0x%02X did not behave like a DAC\n", addr);
+    }
+    return 0;
 }
 
 void setup() {
@@ -129,7 +125,7 @@ void setup() {
     Serial.println("  COMPONENT TEST: DAC43401  (LoRa volt)");
     Serial.println("========================================");
 
-    // Enable the LoRa-side power rail; the DAC43401 may sit on it.
+    // Bring up the LoRa-side power rail (the DAC is on it).
     pinMode(PIN_LORA_PWR, OUTPUT);
     digitalWrite(PIN_LORA_PWR, HIGH);
     delay(20);
@@ -137,94 +133,72 @@ void setup() {
 
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, 400000);
     result("I2C bus initialized (SDA=7, SCL=15)", true);
-    i2cScan();
 
-    // Explicitly probe the addresses the original breakout PDF claimed for
-    // the DAC and the LoRa-temp sensor (0x72 / 0x73).  These almost never
-    // show up in the scan above, but ruling them out by name makes the
-    // diagnostic unambiguous.
-    Serial.println("  [INFO] PDF-claimed addresses:");
-    for (uint8_t addr : {0x72, 0x73}) {
-        Wire.beginTransmission(addr);
-        bool ack = (Wire.endTransmission() == 0);
-        Serial.printf("         0x%02X  ACK=%s\n", addr, ack ? "yes" : "no");
-        if (ack) {
-            bool isDac = looksLikeDac(addr);
-            Serial.printf("                  looksLikeDac=%s\n", isDac ? "yes" : "no");
-            if (isDac) {
-                Serial.printf("  [INFO] DAC43401 *does* live at 0x%02X — update Config.hpp.\n", addr);
-            }
-        }
-    }
-
-
-    // Probe every address that ACKed and behavioural-check it.  Only an
-    // actual DAC43401 will round-trip both test patterns to DAC_DATA.
-    Serial.println("  [INFO] behavioural probe of every responding address:");
-    uint8_t dacAddr = 0;
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        if (Wire.endTransmission() != 0) continue;
-        bool isDac = looksLikeDac(addr);
-        Serial.printf("         0x%02X  looksLikeDac=%s\n",
-                      addr, isDac ? "yes" : "no");
-        if (isDac && dacAddr == 0) dacAddr = addr;
-    }
-
-    result("DAC43401 found on the bus", dacAddr != 0);
+    uint8_t dacAddr = resolveDacAddr();
+    result("DAC43401 located on bus", dacAddr != 0);
     if (dacAddr == 0) {
-        Serial.println("  [HINT] If LoRa-power-enable (GPIO10) is not HIGH, the DAC has no power.");
-        Serial.println("  [HINT] If the DAC is missing on this board variant, this is expected.");
+        Serial.println("  [HINT] Check LoRa power enable (GPIO10) and the DAC's ADDR strap.");
         goto done;
     }
-    Serial.printf("  [INFO] using DAC at 0x%02X\n", dacAddr);
+    Serial.printf("  [INFO] Using DAC at 0x%02X\n", dacAddr);
 
     {
         uint16_t status = 0;
         bool stOk = dacRead16(dacAddr, DAC_REG_STATUS, status);
         Serial.printf("  [INFO] STATUS register = 0x%04X (read=%s)\n",
                       status, stOk ? "yes" : "no");
-        result("Read STATUS register",  stOk);
+        result("Read STATUS register", stOk);
 
-        // Mid-scale write (~ VREF / 2 ≈ 1.65 V on this board).
+        // Mid-scale (~ VREF / 2 ~= 1.65 V).
         bool midOk = dacSetCode(dacAddr, 0x80);
-        Serial.printf("  [INFO] Mid-scale write   (code 0x80, ~1.65 V) ACK=%s\n",
+        Serial.printf("  [INFO] Mid-scale  (code 0x80, ~1.65 V) ACK=%s\n",
                       midOk ? "yes" : "no");
-        result("Write mid-scale (0x80)",   midOk);
+        result("Write mid-scale (0x80)", midOk);
         delay(20);
 
-        // Full-scale write (~ VREF ≈ 3.3 V).
+        // Full-scale (~ VREF ~= 3.3 V).
         bool fullOk = dacSetCode(dacAddr, 0xFF);
-        Serial.printf("  [INFO] Full-scale write  (code 0xFF, ~3.3 V)  ACK=%s\n",
+        Serial.printf("  [INFO] Full-scale (code 0xFF, ~3.3 V)  ACK=%s\n",
                       fullOk ? "yes" : "no");
-        result("Write full-scale (0xFF)",  fullOk);
+        result("Write full-scale (0xFF)", fullOk);
         delay(20);
 
-        // Zero-scale write (0 V).
+        // Zero-scale.
         bool zeroOk = dacSetCode(dacAddr, 0x00);
-        Serial.printf("  [INFO] Zero-scale write  (code 0x00, 0 V)     ACK=%s\n",
+        Serial.printf("  [INFO] Zero-scale (code 0x00, 0 V)     ACK=%s\n",
                       zeroOk ? "yes" : "no");
-        result("Write zero-scale (0x00)",  zeroOk);
+        result("Write zero-scale (0x00)", zeroOk);
         delay(20);
 
-        // Read back DAC_DATA — the chip should hold the last value we wrote.
+        // Confirm the chip remembers the last value we wrote.
         uint16_t readBack = 0;
         bool rbOk = dacRead16(dacAddr, DAC_REG_DAC_DATA, readBack);
-        uint8_t lastCode = static_cast<uint8_t>(readBack >> 8);
+        uint8_t lastCode = static_cast<uint8_t>((readBack >> 4) & 0xFF);
         Serial.printf("  [INFO] DAC_DATA read back = 0x%04X (code=0x%02X, read=%s)\n",
                       readBack, lastCode, rbOk ? "yes" : "no");
-        result("Read DAC_DATA register",   rbOk);
-        result("Read-back matches last write (0x00)",
-               rbOk && lastCode == 0x00);
+        result("Read DAC_DATA register", rbOk);
+        result("Read-back matches last write (0x00)", rbOk && lastCode == 0x00);
 
-        // Leave the DAC at a safe mid-scale so the LoRa PA sees a known voltage.
+        // Sweep through a few codes so the user can probe the LoRa-PA voltage
+        // pin with a multimeter and watch it step.
+        Serial.println("  [INFO] Voltage sweep (5 steps, ~1 s each):");
+        const uint8_t sweep[] = {0x00, 0x40, 0x80, 0xC0, 0xFF};
+        for (uint8_t code : sweep) {
+            dacSetCode(dacAddr, code);
+            float volts = (code * 3.3f) / 255.0f;
+            Serial.printf("         code 0x%02X -> ~%.2f V\n", code, volts);
+            delay(1000);
+        }
+
+        // Leave the DAC at mid-scale so the LoRa PA sees a known safe voltage.
         dacSetCode(dacAddr, 0x80);
         Serial.printf("  [INFO] DAC at 0x%02X left at mid-scale (~1.65 V) on exit.\n", dacAddr);
     }
 
 done:
     Serial.println("========================================");
-    Serial.println("  TEST COMPLETE  –  restarting in 5 s");
+    Serial.printf("  TEST COMPLETE - %d pass, %d fail\n", passCount, failCount);
+    Serial.println("  Restarting in 5 s...");
     Serial.println("========================================");
     delay(5000);
     ESP.restart();

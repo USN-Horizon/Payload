@@ -324,6 +324,27 @@ void App::processSerialCommands_() {
         prefs.end();
         storage_.begin(runId);
         Serial.printf("[CMD] new run id=%lu\n", static_cast<unsigned long>(runId));
+      } else if (cmd.startsWith("volt ")) {
+        long mV = cmd.substring(5).toInt();
+        if (mV < 0)    mV = 0;
+        if (mV > 3300) mV = 3300;
+        bool ok = sensors_.setLoraVolt(static_cast<uint16_t>(mV));
+        Serial.printf("[CMD] LoRa volt -> %ld mV  %s\n", mV, ok ? "OK" : "FAIL");
+      } else if (cmd == "cw on" || cmd == "cw") {
+#if USE_LORA
+        bool ok = lora_.startCw();
+        Serial.printf("[CMD] CW on -> %s. Watch LoRa temp; type 'cw off' to stop.\n",
+                      ok ? "OK" : "FAIL");
+#else
+        Serial.println("[CMD] CW unavailable: USE_LORA disabled");
+#endif
+      } else if (cmd == "cw off" || cmd == "stop") {
+#if USE_LORA
+        bool ok = lora_.stopCw();
+        Serial.printf("[CMD] CW off -> %s\n", ok ? "OK" : "FAIL");
+#else
+        Serial.println("[CMD] CW unavailable: USE_LORA disabled");
+#endif
       } else if (cmd == "last") {
         AccelReading a = sensors_.lastAccel();
         GyroReading  g = sensors_.lastGyro();

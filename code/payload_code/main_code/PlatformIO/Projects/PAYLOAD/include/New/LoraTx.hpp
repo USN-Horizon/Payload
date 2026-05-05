@@ -50,6 +50,13 @@ public:
   uint32_t totalRetries() const { return retries_; }
   uint32_t totalDropped() const { return dropped_; }
 
+  // Diagnostic: continuous-wave transmission. Used to verify the PA is
+  // actually keying — CW heats the chip much faster than packet TX since
+  // there is no duty cycle. Pair startCw() / stopCw() around a few seconds
+  // of CW and watch the LoRa-temp sensor (or feel the chip).
+  bool startCw();
+  bool stopCw();
+
 private:
   // Push a frame onto the queue. If full, the oldest entry is overwritten and
   // the dropped counter is incremented.

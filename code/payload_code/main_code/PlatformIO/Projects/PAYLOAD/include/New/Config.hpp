@@ -19,17 +19,17 @@
 //  boots and continues to log whatever sensors are present.
 // -----------------------------------------------------------------------------
 #define USE_SERIAL     1   // Print status/debug to USB CDC.
-#define PRINT_TX       0   // Print every MAVLink frame as it goes out the radio.
-#define PRINT_TX_HEX   0   // Also dump raw bytes (hex) of every transmitted frame.
-#define USE_LORA       0   // SX1280 transmitter + MAVLink frames.
+#define PRINT_TX       1   // Print every MAVLink frame as it goes out the radio.
+#define PRINT_TX_HEX   1   // Also dump raw bytes (hex) of every transmitted frame.
+#define USE_LORA       1   // SX1280 transmitter + MAVLink frames.
 #define USE_SD         1   // microSD card on PIN_SD_CS.
 #define USE_FLASH      1   // LittleFS log mirror in onboard flash.
-#define USE_GEIGER     1   // Geiger pulse counter (CRD1 + CRD2).
-#define USE_IMU        1   // ICM-45686 accelerometer + gyroscope.
-#define USE_BARO       1   // BMP388 barometer.
-#define USE_MAG        1   // BMM350 magnetometer.
-#define USE_LORA_TEMP  0   // TMP1075 temperature sensor next to LoRa module.
-#define USE_LORA_VOLT  0   // DAC43401 voltage setting that drives LoRa TX power.
+#define USE_GEIGER     0   // Geiger pulse counter (CRD1 + CRD2).
+#define USE_IMU        0   // ICM-45686 accelerometer + gyroscope.
+#define USE_BARO       0   // BMP388 barometer.
+#define USE_MAG        0   // BMM350 magnetometer.
+#define USE_LORA_TEMP  1   // TMP1075 temperature sensor next to LoRa module.
+#define USE_LORA_VOLT  1   // DAC43401 voltage setting that drives LoRa TX power.
 
 // -----------------------------------------------------------------------------
 //  Conditional library includes.
@@ -45,7 +45,7 @@
 #endif
 #if USE_LORA
   #include <RadioLib.h>
-  #include <mavlink/v2.0/common/mavlink.h>
+  #include <mavlink/library/HorizonDialect/mavlink.h>
 #endif
 #if USE_IMU
   #include <ICM45686.h>
@@ -101,8 +101,8 @@ constexpr uint8_t I2C_ADDR_TMP1075  = 0x49;  // Monitors LoRa module temperature
 // -----------------------------------------------------------------------------
 constexpr float   LORA_FREQ_MHZ = 2400.0f;   // Carrier frequency in MHz.
 constexpr float   LORA_BW_KHZ   = 812.5f;    // Bandwidth in kHz.
-constexpr uint8_t LORA_SF       = 7;         // Spreading factor.
-constexpr uint8_t LORA_CR       = 5;         // Coding rate denominator (5 = 4/5).
+constexpr uint8_t LORA_SF       = 9;         // Spreading factor.
+constexpr uint8_t LORA_CR       = 7;         // Coding rate denominator (5 = 4/5).
 constexpr int8_t  LORA_TX_PWR   = 13;        // Output power in dBm (max +13 dBm).
 
 // -----------------------------------------------------------------------------

@@ -6,14 +6,15 @@
 //  LoraTx.cpp
 //  RadioLib SX1280 wrapper plus a ring buffer of frames waiting for a retry.
 //
-//  TX path uses startTransmit() + BUSY-pin polling (same approach as the
-//  test_lora component test).  This avoids the blocking transmit() in
-//  RadioLib that waits for DIO1 to fire — on this board DIO1 (CXT / GPIO11)
-//  does not assert HIGH on TxDone, so transmit() always returns
-//  RADIOLIB_ERR_TX_TIMEOUT (-5) even though the radio actually sent.
+//  TX completion: poll the SX1280 IRQ status register for the TxDone bit.
+//  Neither DIO1 (CXT / GPIO11) nor the BUSY pin are reliable indicators on
+//  this board — DIO1 never asserts HIGH on TxDone, and BUSY can already
+//  read LOW by the time we sample it after startTransmit(). Polling the
+//  IRQ register over SPI works regardless of how those pins are wired.
 // =============================================================================
 
-constexpr uint32_t LORA_TX_BUSY_TIMEOUT_MS = 100;  // upper bound on TX time.
+constexpr uint32_t LORA_TX_TIMEOUT_MS = 1000;  // upper bound on TX-on-air time.
+constexpr uint16_t SX128X_IRQ_TX_DONE = 0x0001;
 
 LoraTx::LoraTx()
   : mod_(new Module(PIN_LORA_CS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY,
@@ -21,25 +22,40 @@ LoraTx::LoraTx()
     radio_(mod_) {}
 
 // Input  : data, len - bytes to transmit; len <= LORA_FRAME_MAX.
-// What   : starts a non-blocking transmit, then polls the SX1280 BUSY pin
-//          until the chip returns to idle (or times out).  This sidesteps
-//          DIO1 entirely.
+// What   : starts a non-blocking transmit, then polls the SX1280 IRQ status
+//          register for the TxDone bit (bit 0). Clears the IRQ and brings
+//          the chip back to standby once TxDone is observed.
 // Output : RADIOLIB_ERR_NONE on success, the startTransmit error otherwise,
-//          or RADIOLIB_ERR_TX_TIMEOUT if BUSY never clears in time.
-static int16_t txBlockOnBusy(SX1280& radio, const uint8_t* data, uint8_t len) {
+//          or RADIOLIB_ERR_TX_TIMEOUT if TxDone never sets in time.
+static int16_t txBlockOnIrq(SX1280& radio, const uint8_t* data, uint8_t len) {
+  // startTransmit() internally clears stale IRQ flags before keying TX.
+  uint32_t tStart = millis();
   int16_t s = radio.startTransmit(const_cast<uint8_t*>(data), len);
   if (s != RADIOLIB_ERR_NONE) return s;
 
-  uint32_t t0 = millis();
-  while (digitalRead(PIN_LORA_BUSY) == HIGH) {
-    if (millis() - t0 > LORA_TX_BUSY_TIMEOUT_MS) {
-      radio.standby();
+  while ((radio.getIrqStatus() & SX128X_IRQ_TX_DONE) == 0) {
+    if (millis() - tStart > LORA_TX_TIMEOUT_MS) {
+#if USE_SERIAL
+      Serial.printf("[LoRa] TX timeout after %lu ms, IRQ=0x%04X\n",
+                    static_cast<unsigned long>(millis() - tStart),
+                    static_cast<unsigned>(radio.getIrqStatus()));
+#endif
+      radio.finishTransmit();
       return RADIOLIB_ERR_TX_TIMEOUT;
     }
+    delay(1);
   }
 
-  // Bring the radio back to standby so the next transmit starts clean.
-  radio.standby();
+  uint32_t dur = millis() - tStart;
+#if USE_SERIAL && PRINT_TX
+  Serial.printf("[LoRa] TX %u bytes done in %lu ms\n",
+                static_cast<unsigned>(len), static_cast<unsigned long>(dur));
+#else
+  (void)dur;
+#endif
+
+  // finishTransmit() clears the IRQ flags and returns the chip to standby.
+  radio.finishTransmit();
   return RADIOLIB_ERR_NONE;
 }
 
@@ -86,7 +102,7 @@ bool LoraTx::begin() {
 bool LoraTx::send(const uint8_t* data, uint8_t len) {
   if (!ready_ || data == nullptr || len == 0 || len > LORA_FRAME_MAX) return false;
 
-  int s = txBlockOnBusy(radio_, data, len);
+  int s = txBlockOnIrq(radio_, data, len);
   if (s == RADIOLIB_ERR_NONE) {
     sent_++;
     return true;
@@ -114,7 +130,7 @@ size_t LoraTx::service(uint8_t maxAttemptsThisTick) {
     PendingFrame f;
     if (!popOldest_(f)) break;
 
-    int s = txBlockOnBusy(radio_, f.data, f.len);
+    int s = txBlockOnIrq(radio_, f.data, f.len);
     if (s == RADIOLIB_ERR_NONE) {
       sent_++;
       did++;
@@ -142,6 +158,26 @@ size_t LoraTx::service(uint8_t maxAttemptsThisTick) {
   }
 
   return did;
+}
+
+// =============================================================================
+//  startCw / stopCw  -  diagnostic continuous-wave transmission.
+// =============================================================================
+bool LoraTx::startCw() {
+  if (!ready_) return false;
+  int16_t s = radio_.transmitDirect();
+#if USE_SERIAL
+  Serial.printf("[LoRa] CW start -> %d (0=OK)\n", s);
+#endif
+  return s == RADIOLIB_ERR_NONE;
+}
+
+bool LoraTx::stopCw() {
+  int16_t s = radio_.standby();
+#if USE_SERIAL
+  Serial.printf("[LoRa] CW stop  -> %d (0=OK)\n", s);
+#endif
+  return s == RADIOLIB_ERR_NONE;
 }
 
 // =============================================================================

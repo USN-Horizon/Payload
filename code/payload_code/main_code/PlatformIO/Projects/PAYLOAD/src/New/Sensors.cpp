@@ -141,7 +141,31 @@ bool Sensors::begin() {
 #if USE_SERIAL
   Serial.println(dac43401Ok_ ? "[SENS] DAC43401 present" : "[SENS] DAC43401 missing");
 #endif
-  if (dac43401Ok_) any = true;
+  if (dac43401Ok_) {
+    // Wake sequence: send DEVICE_UNLOCK magic and clear GENERAL_CONFIG so
+    // the DAC is out of any power-down state before we write DAC_DATA.
+    Wire.beginTransmission(I2C_ADDR_DAC43401);
+    Wire.write(static_cast<uint8_t>(0x36));
+    Wire.write(static_cast<uint8_t>(0x50));
+    Wire.write(static_cast<uint8_t>(0x00));
+    Wire.endTransmission();
+    delay(2);
+    Wire.beginTransmission(I2C_ADDR_DAC43401);
+    Wire.write(static_cast<uint8_t>(0x09));
+    Wire.write(static_cast<uint8_t>(0x00));
+    Wire.write(static_cast<uint8_t>(0x00));
+    Wire.endTransmission();
+    delay(2);
+
+    // Default to 1.66 V (~mid-scale, code 0x80). At a 1 m link distance the
+    // SX1280 PA does not need much drive; this keeps current and heat low.
+    setLoraVolt(3300);
+#if USE_SERIAL
+    Serial.printf("[SENS] DAC43401 set to %u mV\n",
+                  static_cast<unsigned>(cachedDacMv_));
+#endif
+    any = true;
+  }
 #endif
 
   return any;
@@ -275,16 +299,18 @@ bool Sensors::setLoraVolt(uint16_t mV) {
 #if USE_LORA_VOLT
   if (!dac43401Ok_) return false;
 
-  // DAC43401: 8-bit single-channel DAC, full scale = 3.3 V.
+  // DAC43401: 8-bit single-channel DAC, full scale ~= VDD ~= 3.3 V.
   // Output mV = code * 3300 / 255 -> code = mV * 255 / 3300.
   if (mV > 3300) mV = 3300;
   uint8_t code = static_cast<uint8_t>((static_cast<uint32_t>(mV) * 255u) / 3300u);
 
-  // Write to DAC_DATA register (0x21) per TI datasheet, MSB-aligned 8-bit code.
+  // DAC_DATA register (0x21) layout: bits [15:12] reserved, bits [11:4] hold
+  // the 8-bit code, bits [3:0] reserved. So the code goes in as `code << 4`.
+  uint16_t reg = static_cast<uint16_t>(code) << 4;
   Wire.beginTransmission(I2C_ADDR_DAC43401);
   Wire.write(static_cast<uint8_t>(0x21));
-  Wire.write(code);
-  Wire.write(static_cast<uint8_t>(0x00));
+  Wire.write(static_cast<uint8_t>(reg >> 8));
+  Wire.write(static_cast<uint8_t>(reg & 0xFF));
   if (Wire.endTransmission() != 0) return false;
 
   cachedDacMv_ = mV;

@@ -1,0 +1,57 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<mavlink>
+
+  <include>common.xml</include>
+  <dialect>5</dialect>
+  
+  <enums>
+    <enum name="ROCKET_STATE_TYPE">
+      <description>Flight phase of the rocket.</description>
+      <entry value="0" name="ROCKET_STATE_IDLE">
+        <description>On the pad, not armed.</description>
+      </entry>
+      <entry value="1" name="ROCKET_STATE_CALIBRATED">
+        <description>Sensors calibrated, ready for launch.</description>
+      </entry>
+      <entry value="2" name="ROCKET_STATE_THRUSTING">
+        <description>Motor burning, ascending under power.</description>
+      </entry>
+      <entry value="3" name="ROCKET_STATE_COASTING">
+        <description>Motor burnout, ascending on momentum.</description>
+      </entry>
+      <entry value="4" name="ROCKET_STATE_DROGUE">
+        <description>Drogue parachute deployed.</description>
+      </entry>
+      <entry value="5" name="ROCKET_STATE_MAIN">
+        <description>Main parachute deployed.</description>
+      </entry>
+      <entry value="6" name="ROCKET_STATE_TOUCHDOWN">
+        <description>Landed.</description>
+      </entry>
+    </enum>
+  </enums>
+  
+  <messages>
+    <message id="16000" name="FLIGHT_STATES" >
+      <description>Current phase of the rocket</description>
+      <field type="uint64_t" name="time_usec" units="us"> Timestamp(micro seconds since boot) </field>
+      <field type="uint8_t" name="phase" enum="ROCKET_STATE_TYPE">Current Flight State: </field>
+    </message>
+    
+    <message id="16001" name="PAYLOAD_TEMPERATURE">
+      <description>Temperature readings from three points on the payload stack</description>
+      <field type="uint64_t" name="time_usec" units="us"> Timestamp(micro seconds since boot) </field>
+      <field type="float" name="top_temp" units="degC">Top-Stack: </field>
+      <field type="float" name="mid_temp" units="degC">Mid-Stack:</field>
+      <field type="float" name="bottom_temp" units="degC">Bottom-Stack</field>
+    </message>
+    
+    <message id="16002" name="COSMIC_RADIATION">
+      <description>Cosmic radiation data</description>
+      <field type="uint64_t" name="time_usec" units="us"> Timestamp(micro seconds since boot) </field>
+      <field type="uint16_t" name="radiation"></field>
+    </message>
+    
+  </messages>
+
+</mavlink>
