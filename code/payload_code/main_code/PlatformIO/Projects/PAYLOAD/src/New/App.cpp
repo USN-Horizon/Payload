@@ -170,17 +170,12 @@ void App::runTxCycle_(uint32_t nowMs) {
     sendFrame_(buf, n);
   }
   if (gc.ok) {
-    n = MavlinkFrames::buildGeiger(buf, gc, 1);
-    snprintf(body, sizeof(body), "t=%lu ms  counts=%lu",
-             (unsigned long)gc.t_ms, (unsigned long)gc.counts1);
-    printTx_("GEIG_1", body, buf, n);
-    sendFrame_(buf, n);
-  }
-  if (gc.ok) {
-    n = MavlinkFrames::buildGeiger(buf, gc, 2);
-    snprintf(body, sizeof(body), "t=%lu ms  counts=%lu",
-             (unsigned long)gc.t_ms, (unsigned long)gc.counts2);
-    printTx_("GEIG_2", body, buf, n);
+    n = MavlinkFrames::buildCosmicRadiation(buf, gc);
+    snprintf(body, sizeof(body), "t=%lu ms  counts1=%lu counts2=%lu total=%lu",
+             (unsigned long)gc.t_ms,
+             (unsigned long)gc.counts1, (unsigned long)gc.counts2,
+             (unsigned long)(gc.counts1 + gc.counts2));
+    printTx_("COSMIC", body, buf, n);
     sendFrame_(buf, n);
   }
   if (lt.ok) {

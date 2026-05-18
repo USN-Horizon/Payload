@@ -8,14 +8,14 @@
 //  goes on the LoRa air interface.
 //
 //  Mapping of sensor → MAVLink message (one packet per LoRa transmission):
-//    Heartbeat     -> HEARTBEAT          (msg id 0)
-//    Accel xyz     -> SCALED_IMU         (msg id 26),  only acc fields used.
-//    Gyro xyz      -> SCALED_IMU2        (msg id 116), only gyro fields used.
-//    Mag xyz       -> SCALED_IMU3        (msg id 129), only mag fields used.
-//    Baro pressure -> SCALED_PRESSURE    (msg id 29),  only press_abs used.
-//    Baro temp     -> NAMED_VALUE_INT    (msg id 252), name "BARO_T", cdegC.
-//    Geiger CRD1   -> NAMED_VALUE_INT    name "GEIG_1", counts/interval.
-//    Geiger CRD2   -> NAMED_VALUE_INT    name "GEIG_2", counts/interval.
+//    Heartbeat     -> HEARTBEAT          (msg id 0,     common dialect)
+//    Accel xyz     -> SCALED_IMU         (msg id 26,    common), acc fields.
+//    Gyro xyz      -> SCALED_IMU2        (msg id 116,   common), gyro fields.
+//    Mag xyz       -> SCALED_IMU3        (msg id 129,   common), mag fields.
+//    Baro pressure -> SCALED_PRESSURE    (msg id 29,    common), press_abs.
+//    Baro temp     -> NAMED_VALUE_INT    (msg id 252,   common), "BARO_T".
+//    Geiger total  -> COSMIC_RADIATION   (msg id 16002, HorizonDialect):
+//                                          counts1 + counts2, clamped uint16.
 //    LoRa temp     -> NAMED_VALUE_INT    name "LORA_T", cdegC.
 //    LoRa volt     -> NAMED_VALUE_INT    name "LORA_V", millivolts.
 // =============================================================================
@@ -56,10 +56,12 @@ namespace MavlinkFrames {
   // Output : number of bytes written.
   size_t buildBaroTemp(uint8_t* out, const BaroReading& r);
 
-  // Input  : out, r, channel - 1 for CRD1 or 2 for CRD2.
-  // What   : packs NAMED_VALUE_INT "GEIG_1" or "GEIG_2" with the count.
+  // Input  : out, r - the GeigerReading to encode.
+  // What   : packs the HorizonDialect COSMIC_RADIATION message carrying the
+  //          combined Geiger count (counts1 + counts2) for the interval,
+  //          clamped to uint16_t. The reading's t_ms is converted to usec.
   // Output : number of bytes written.
-  size_t buildGeiger(uint8_t* out, const GeigerReading& r, uint8_t channel);
+  size_t buildCosmicRadiation(uint8_t* out, const GeigerReading& r);
 
   // Input  : out, r - the LoraTempReading.
   // What   : packs NAMED_VALUE_INT "LORA_T" with the cdegC temperature.

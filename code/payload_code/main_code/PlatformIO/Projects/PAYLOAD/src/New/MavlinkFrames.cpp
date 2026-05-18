@@ -87,14 +87,15 @@ size_t buildBaroTemp(uint8_t* out, const BaroReading& r) {
   return serialize(msg, out);
 }
 
-size_t buildGeiger(uint8_t* out, const GeigerReading& r, uint8_t channel) {
+size_t buildCosmicRadiation(uint8_t* out, const GeigerReading& r) {
   mavlink_message_t msg;
-  const char* name = (channel == 2) ? "GEIG_2" : "GEIG_1";
-  uint32_t val = (channel == 2) ? r.counts2 : r.counts1;
-  if (val > static_cast<uint32_t>(INT32_MAX)) val = INT32_MAX;
-  mavlink_msg_named_value_int_pack(MAV_SYSID, MAV_COMPID, &msg,
-                                   r.t_ms, name,
-                                   static_cast<int32_t>(val));
+  // COSMIC_RADIATION carries one uint16_t `radiation` field, so we send the
+  // combined count of both Geiger channels and clamp to 0xFFFF.
+  uint32_t total = r.counts1 + r.counts2;
+  if (total > 0xFFFFu) total = 0xFFFFu;
+  mavlink_msg_cosmic_radiation_pack(MAV_SYSID, MAV_COMPID, &msg,
+                                    static_cast<uint64_t>(r.t_ms) * 1000ULL,
+                                    static_cast<uint16_t>(total));
   return serialize(msg, out);
 }
 
