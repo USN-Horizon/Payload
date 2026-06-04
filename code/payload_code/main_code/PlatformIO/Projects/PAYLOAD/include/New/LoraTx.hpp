@@ -5,7 +5,9 @@
 //  Owns the SX1280 radio plus a small ring buffer of frames that failed to
 //  transmit. The cycle is:
 //    1. App reads sensors and calls send(frame, len).
-//    2. send() tries one radio_.transmit(); on failure the frame is queued.
+//    2. send() runs one polling-based TX (startTransmit + poll IRQ TxDone +
+//       finishTransmit); on failure the frame is queued. DIO1 is not used
+//       because GPIO 11 is not connected to the SX1280 DIO1 pad on this PCB.
 //    3. service() walks the queue once per tick, retrying a few entries.
 //    4. After LORA_MAX_ATTEMPTS the frame is dropped (counted in dropped()).
 // =============================================================================

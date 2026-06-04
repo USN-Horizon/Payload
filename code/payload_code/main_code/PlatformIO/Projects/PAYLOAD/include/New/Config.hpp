@@ -25,9 +25,9 @@
 #define USE_SD         1   // microSD card on PIN_SD_CS.
 #define USE_FLASH      1   // LittleFS log mirror in onboard flash.
 #define USE_GEIGER     0   // Geiger pulse counter (CRD1 + CRD2).
-#define USE_IMU        0   // ICM-45686 accelerometer + gyroscope.
-#define USE_BARO       0   // BMP388 barometer.
-#define USE_MAG        0   // BMM350 magnetometer.
+#define USE_IMU        1   // ICM-45686 accelerometer + gyroscope.
+#define USE_BARO       1   // BMP388 barometer.
+#define USE_MAG        1   // BMM350 magnetometer.
 #define USE_LORA_TEMP  1   // TMP1075 temperature sensor next to LoRa module.
 #define USE_LORA_VOLT  1   // DAC43401 voltage setting that drives LoRa TX power.
 
@@ -117,6 +117,27 @@ constexpr uint8_t MAV_COMPID  = 191;         // Component ID for "scientific pay
 constexpr uint32_t TX_CYCLE_INTERVAL_MS    = 1000;  // One full TX cycle per second.
 constexpr uint32_t SENSOR_POLL_INTERVAL_MS = 50;    // Refresh latest values 20 Hz.
 constexpr uint32_t HEARTBEAT_INTERVAL_MS   = 5000;  // MAVLink heartbeat cadence.
+
+// -----------------------------------------------------------------------------
+//  Launch gate (low-power wait).
+//  On the pad the payload may sit powered for hours waiting on weather. While
+//  USE_LAUNCH_GATE is set, App::begin() blocks in a low-power loop and does NOT
+//  start logging / transmitting until it sees flight begin: the accelerometer
+//  magnitude staying above LAUNCH_THRESHOLD_MG (a clear jump over the ~1000 mg
+//  it reads at rest) for LAUNCH_CONFIRM_SAMPLES samples. The debounce tolerates
+//  brief dips (decrements, never hard-resets) so a sustained-but-noisy burn
+//  still trips while a one-off knock on the pad cannot. Requires USE_IMU.
+//  Validated standalone by env:test_lowpower_wake.
+// -----------------------------------------------------------------------------
+#define USE_LAUNCH_GATE        1   // Wait for launch before mission work.
+// Set to 1 for the lowest pad current (esp_light_sleep between checks). NOTE:
+// light sleep tears down the USB-CDC link, so the serial monitor drops and USB
+// uploads can be blocked while it runs - fine in flight (no host), awkward on
+// the bench. Leave 0 for bench work; set 1 for the actual flight build.
+#define LAUNCH_USE_LIGHT_SLEEP 0
+constexpr int32_t  LAUNCH_THRESHOLD_MG      = 1500; // > resting ~1000 mg.
+constexpr uint8_t  LAUNCH_CONFIRM_SAMPLES   = 3;    // Sustained, not a tap.
+constexpr uint32_t LAUNCH_CHECK_INTERVAL_MS = 200;  // 5 Hz duty cycle.
 
 // -----------------------------------------------------------------------------
 //  LoRa retry queue. If a frame fails to transmit it is pushed onto the queue

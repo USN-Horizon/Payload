@@ -55,6 +55,14 @@ private:
   // Output : (none)
   void processSerialCommands_();
 
+  // Input  : (none)
+  // What   : when USE_LAUNCH_GATE is set, blocks in a low-power loop until the
+  //          accelerometer shows sustained launch acceleration (see Config.hpp).
+  //          Returns immediately if the gate is disabled or the IMU is absent,
+  //          so a failed IMU can never strand the payload on the pad.
+  // Output : (none)
+  void waitForLaunch_();
+
   // Helper that submits one prebuilt frame to the radio (when USE_LORA).
   void sendFrame_(const uint8_t* buf, size_t len);
 

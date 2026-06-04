@@ -22,6 +22,17 @@
 //   [D] SD after radio.begin() succeeds (radio idle on bus)
 //   [E] Interleaved: SD write -> LoRa TX -> SD read-back, repeated
 //   [F] SD while LoRa TX is in flight (BUSY high)
+//   [H] SD mount retry burst (10x, LoRa idle) - catches transient init.
+//   [I] SD SPI clock sweep - find highest stable speed with LoRa idle.
+//   [J] LoRa SPI round-trip after SD activity - confirms radio still alive.
+//   [K] MISO / LoRa CS / BUSY line probe - detects bus contention directly.
+//   [L] 20-round heavy interleave, reports first failing iteration.
+//   [M] DIO1 watch during a single TX - does TxDone IRQ ever fire?
+//   [N] Read SX1280 IRQ status after TX - does the radio think TX done?
+//   [P] MISO probe with SX1280 in RESET - isolates pull-up source.
+//   [Q] DIO1 vs DIO2 during TX - detects swapped pins.
+//   [R] DIO1 connectivity probe - tells if GPIO11 reaches the chip pad.
+//   [S] Polling-based TX (no DIO1) - firmware workaround proof.
 //   [G] LittleFS sanity (internal flash, independent of SPI)
 //
 // PASS criteria: every SD write/read in every stage succeeds.
@@ -291,6 +302,420 @@ void setup() {
         }
     } else {
         result("[F] SD during TX (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [H] SD mount retry burst with LoRa idle.
+    // SD initialization is finicky and can fail on the first attempt
+    // even when the wiring is fine. If this reports 9-10/10 successes,
+    // any earlier mount failure was probably transient: bump retries.
+    // If it reports <5/10, mount-time stability is genuinely poor.
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [H] SD mount retry burst (10x, LoRa idle) ---");
+    if (radioOk) {
+        int mountSuccesses = 0;
+        for (int i = 0; i < 10; ++i) {
+            bool ok = sdMount();
+            if (ok) {
+                mountSuccesses++;
+                SD.end();
+            }
+            delay(50);
+        }
+        Serial.printf("  [INFO] SD.begin() succeeded %d/10 times\n",
+                      mountSuccesses);
+        result("[H] SD mounts >= 9/10 times", mountSuccesses >= 9);
+    } else {
+        result("[H] retry burst (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [I] SD SPI clock sweep.
+    // Probe each speed from 400 kHz up to 25 MHz. If only the lowest
+    // speeds work, signal integrity / brown-out is hurting the SD at
+    // higher clocks. If all speeds work, signal integrity is fine and
+    // the earlier failures must come from something else (NSS, ordering).
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [I] SD SPI clock sweep ---");
+    if (radioOk) {
+        const uint32_t speeds[] = {400000UL, 1000000UL, 4000000UL,
+                                   8000000UL, 16000000UL, 20000000UL,
+                                   25000000UL};
+        long bestSpeed = -1;
+        for (size_t i = 0; i < sizeof(speeds) / sizeof(speeds[0]); ++i) {
+            bool mounted = SD.begin(PIN_SD_CS, SPI, speeds[i]);
+            bool rwOk = false;
+            if (mounted) {
+                rwOk = sdWriteRead("I");
+                SD.end();
+            }
+            Serial.printf("  [INFO] @%lu Hz: mount=%s rw=%s\n",
+                          (unsigned long)speeds[i],
+                          mounted ? "OK" : "FAIL",
+                          rwOk ? "OK" : "FAIL");
+            if (mounted && rwOk) bestSpeed = static_cast<long>(speeds[i]);
+            delay(50);
+        }
+        Serial.printf("  [INFO] Highest stable speed: %ld Hz\n", bestSpeed);
+        result("[I] At least 1 MHz stable", bestSpeed >= 1000000L);
+    } else {
+        result("[I] clock sweep (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [J] LoRa SPI round-trip BEFORE and AFTER touching SD.
+    // standby() and getRSSI() both perform SPI transactions with the
+    // SX1280. If standby() returns OK before SD activity but errors
+    // after, then SD operations corrupted the LoRa SPI state (most
+    // likely an unbalanced beginTransaction/endTransaction pair).
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [J] LoRa SPI still responsive after SD activity ---");
+    if (radioOk) {
+        int s1 = radio.standby();
+        bool mounted = sdMount();
+        bool rwOk = false;
+        if (mounted) {
+            rwOk = sdWriteRead("J");
+            SD.end();
+        }
+        int s2 = radio.standby();
+        float rssi = radio.getRSSI();
+        Serial.printf("  [INFO] pre-SD standby=%d  post-SD standby=%d  "
+                      "RSSI=%.1f dBm\n", s1, s2, rssi);
+        result("[J] LoRa standby OK before and after SD",
+               s1 == RADIOLIB_ERR_NONE && s2 == RADIOLIB_ERR_NONE && rwOk);
+    } else {
+        result("[J] LoRa responsiveness (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [K] MISO / LoRa CS / BUSY line probe.
+    // With both CS pins HIGH, no slave should be driving MISO. The pin
+    // is therefore floating. We force MISO into an INPUT_PULLUP and
+    // then INPUT_PULLDOWN configuration and read it back: a truly
+    // floating line follows the pull, but a line that is being driven
+    // ignores the pull and reads the same value either way (-> bus
+    // contention). LORA_CS must read HIGH and LORA_BUSY LOW when idle.
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [K] MISO / LoRa line probe (bus contention) ---");
+    {
+        pinMode(PIN_LORA_CS, OUTPUT); digitalWrite(PIN_LORA_CS, HIGH);
+        pinMode(PIN_SD_CS,   OUTPUT); digitalWrite(PIN_SD_CS,   HIGH);
+        delay(5);
+
+        pinMode(PIN_SPI_MISO, INPUT_PULLUP);
+        delay(1);
+        int misoPullUp = digitalRead(PIN_SPI_MISO);
+        pinMode(PIN_SPI_MISO, INPUT_PULLDOWN);
+        delay(1);
+        int misoPullDown = digitalRead(PIN_SPI_MISO);
+        pinMode(PIN_SPI_MISO, INPUT);  // SPI driver will reconfigure later.
+
+        Serial.printf("  [INFO] MISO with pullup=%d  with pulldown=%d  "
+                      "(diff -> floating OK; same -> bus contention)\n",
+                      misoPullUp, misoPullDown);
+        bool misoFloating = (misoPullUp == HIGH) && (misoPullDown == LOW);
+        result("[K] MISO floats when both CS are HIGH", misoFloating);
+
+        int csNow   = digitalRead(PIN_LORA_CS);
+        int busyNow = digitalRead(PIN_LORA_BUSY);
+        Serial.printf("  [INFO] LORA_CS=%d (expect 1)  LORA_BUSY=%d "
+                      "(expect 0 when idle)\n", csNow, busyNow);
+        result("[K] LORA_CS HIGH and LORA_BUSY LOW when idle",
+               csNow == HIGH && busyNow == LOW);
+    }
+
+    // -------------------------------------------------------------------
+    // [L] Heavy interleave stress (20 rounds), reports first failing iter.
+    // Stage E only does 5 rounds and only reports a single pass/fail.
+    // This stage runs 20 and prints the index of the first failure (if
+    // any), so an intermittent fault that needs N seconds to appear is
+    // easier to spot.
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [L] Heavy interleave stress (20x, abort on first fail) ---");
+    if (radioOk) {
+        bool mounted = sdMount();
+        result("[L] SD mount before stress", mounted);
+        if (mounted) {
+            int firstFailIter = -1;
+            int lastTxStatus  = RADIOLIB_ERR_NONE;
+            bool lastSdOk     = true;
+            for (int i = 0; i < 20; ++i) {
+                String msg = "STRESS_" + String(i);
+                int s = radio.transmit(msg);
+                bool sdOk = sdWriteRead("L");
+                lastTxStatus = s;
+                lastSdOk     = sdOk;
+                if (s != RADIOLIB_ERR_NONE || !sdOk) {
+                    firstFailIter = i;
+                    break;
+                }
+            }
+            if (firstFailIter < 0) {
+                Serial.println("  [INFO] all 20 iterations passed");
+            } else {
+                Serial.printf("  [INFO] FAIL at iter %d: tx=%d sd=%s\n",
+                              firstFailIter, lastTxStatus,
+                              lastSdOk ? "OK" : "FAIL");
+            }
+            result("[L] 20x stress with no failures", firstFailIter < 0);
+            SD.end();
+        }
+    } else {
+        result("[L] stress (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [M] DIO1 watch during a single transmit attempt.
+    // -5 (RADIOLIB_ERR_TX_TIMEOUT) means RadioLib never saw TxDone. This
+    // stage polls DIO1 directly after startTransmit() and reports
+    // whether (and when) DIO1 goes HIGH. If DIO1 NEVER goes HIGH:
+    //   - either the SX1280's IRQ mask doesn't route TxDone to DIO1
+    //     (firmware config issue), or
+    //   - the physical pin (GPIO 11) is not actually wired to the
+    //     SX1280's DIO1 pad (PCB / pin-map issue).
+    // If DIO1 DOES go HIGH but transmit() still returns -5, RadioLib
+    // is missing the edge - check that the SPI bus isn't held by
+    // another driver while RadioLib polls.
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [M] DIO1 watch during single TX (does TxDone fire?) ---");
+    if (radioOk) {
+        radio.standby();
+        radio.clearIrqFlags(0xFFFFFFFFu);
+        int dio1Pre  = digitalRead(PIN_LORA_DIO1);
+        int busyPre  = digitalRead(PIN_LORA_BUSY);
+        int s = radio.startTransmit("DIO1_TEST");
+        uint32_t t0 = millis();
+        bool dio1Fired = false;
+        uint32_t dio1FireMs = 0;
+        int dio1Last = dio1Pre;
+        int busyLast = busyPre;
+        while (millis() - t0 < 200) {
+            int d = digitalRead(PIN_LORA_DIO1);
+            if (d == HIGH && !dio1Fired) {
+                dio1Fired = true;
+                dio1FireMs = millis() - t0;
+            }
+            dio1Last = d;
+            busyLast = digitalRead(PIN_LORA_BUSY);
+        }
+        Serial.printf("  [INFO] startTransmit=%d  pre: DIO1=%d BUSY=%d\n",
+                      s, dio1Pre, busyPre);
+        Serial.printf("  [INFO] DIO1 fired=%d  at t=%lu ms  final DIO1=%d "
+                      "BUSY=%d\n",
+                      dio1Fired ? 1 : 0, (unsigned long)dio1FireMs,
+                      dio1Last, busyLast);
+        result("[M] DIO1 asserts within 200 ms (TxDone IRQ fires)",
+               dio1Fired);
+    } else {
+        result("[M] DIO1 watch (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [N] Read SX1280 IRQ status after a transmit attempt.
+    // This tells us what the radio THINKS happened, independent of
+    // RadioLib's polling. SX1280 IRQ bits we care about:
+    //   bit 0 = TxDone       -> TX completed
+    //   bit 1 = RxDone
+    //   bit 6 = CrcError
+    //   bit 9 = RxTxTimeout  -> radio aborted internally
+    // If TxDone is set but DIO1 didn't fire in [M], the IRQ mask isn't
+    // routing TxDone to DIO1. If neither TxDone nor RxTxTimeout is set,
+    // the radio never actually entered TX mode (PA / RFSWITCH issue).
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [N] SX1280 IRQ status after TX attempt ---");
+    if (radioOk) {
+        radio.standby();
+        radio.clearIrqFlags(0xFFFFFFFFu);
+        int s = radio.startTransmit("IRQ_TEST");
+        delay(80);  // generous TOA budget for a short payload
+        uint16_t irq = radio.getIrqStatus();
+        Serial.printf("  [INFO] startTransmit=%d  IRQ=0x%04X\n", s, irq);
+        Serial.printf("  [INFO]   TxDone=%d  RxDone=%d  CrcError=%d  "
+                      "RxTxTimeout=%d\n",
+                      (irq >> 0) & 1,
+                      (irq >> 1) & 1,
+                      (irq >> 6) & 1,
+                      (irq >> 9) & 1);
+        result("[N] IRQ TxDone bit set after TX attempt",
+               (irq & 0x0001) != 0);
+        radio.clearIrqFlags(0xFFFFFFFFu);
+    } else {
+        result("[N] IRQ status (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [P] MISO probe with SX1280 held in RESET.
+    // Re-run the [K] MISO test but with PIN_LORA_RST = LOW so the
+    // SX1280 cannot drive any pin. If MISO still reads HIGH under
+    // both pull-up and pull-down, the bias is from the SD breakout
+    // (a board-level pull-up on MISO, which is very common) and the
+    // earlier [K] FAIL is a benign false positive.
+    // If MISO becomes floating (follows the pull) only when SX1280 is
+    // in reset, the SX1280 IS driving MISO even when NSS is HIGH -
+    // a real bus-contention bug.
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [P] MISO probe with SX1280 held in RESET ---");
+    {
+        pinMode(PIN_LORA_RST, OUTPUT); digitalWrite(PIN_LORA_RST, LOW);
+        pinMode(PIN_LORA_CS,  OUTPUT); digitalWrite(PIN_LORA_CS,  HIGH);
+        pinMode(PIN_SD_CS,    OUTPUT); digitalWrite(PIN_SD_CS,    HIGH);
+        delay(5);
+
+        pinMode(PIN_SPI_MISO, INPUT_PULLUP);
+        delay(1);
+        int misoPullUp = digitalRead(PIN_SPI_MISO);
+        pinMode(PIN_SPI_MISO, INPUT_PULLDOWN);
+        delay(1);
+        int misoPullDown = digitalRead(PIN_SPI_MISO);
+        pinMode(PIN_SPI_MISO, INPUT);
+
+        Serial.printf("  [INFO] (SX1280 in RESET) MISO pullup=%d  pulldown=%d\n",
+                      misoPullUp, misoPullDown);
+        bool misoFloating = (misoPullUp == HIGH) && (misoPullDown == LOW);
+        bool misoStuckHigh = (misoPullUp == HIGH) && (misoPullDown == HIGH);
+        if (misoFloating) {
+            Serial.println("  [INFO] MISO floats with SX1280 in reset -> "
+                           "earlier [K] FAIL was SX1280 driving MISO.");
+        } else if (misoStuckHigh) {
+            Serial.println("  [INFO] MISO still stuck HIGH with SX1280 in "
+                           "reset -> bias is on the SD breakout (board "
+                           "pull-up); [K] FAIL is benign.");
+        }
+        result("[P] MISO floats with SX1280 in reset", misoFloating);
+
+        // Release reset so subsequent stages can use the radio if needed.
+        digitalWrite(PIN_LORA_RST, HIGH);
+        delay(10);
+    }
+
+    // -------------------------------------------------------------------
+    // [Q] During a TX, poll BOTH DIO1 and DIO2.
+    // SX1280 has 3 DIO pins; the silkscreen vs the actual pad routing
+    // can disagree. If TxDone shows up on DIO2 instead of DIO1, the
+    // pins are wired swapped on the PCB.
+    // Interpretation:
+    //   - DIO1 fires      -> previous [M] result was wrong (unlikely);
+    //                        check whether [M]'s poll loop missed it.
+    //   - DIO2 fires      -> pin swap: in firmware change PIN_LORA_DIO1
+    //                        to 12 (or whatever GPIO is wired to the
+    //                        true DIO1 pad), or rework the PCB.
+    //   - Neither fires   -> DIO1 line is open (proceed to [R] / [S]).
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [Q] DIO1 vs DIO2 watch during TX (swap detect) ---");
+    if (radioOk) {
+        radio.standby();
+        radio.clearIrqFlags(0xFFFFFFFFu);
+        pinMode(PIN_LORA_DIO1, INPUT);
+        pinMode(PIN_LORA_DIO2, INPUT);
+        int s = radio.startTransmit("DIO_SWAP_TEST");
+        uint32_t t0 = millis();
+        bool dio1Fired = false, dio2Fired = false;
+        uint32_t dio1Ms = 0, dio2Ms = 0;
+        while (millis() - t0 < 200) {
+            if (digitalRead(PIN_LORA_DIO1) == HIGH && !dio1Fired) {
+                dio1Fired = true;  dio1Ms = millis() - t0;
+            }
+            if (digitalRead(PIN_LORA_DIO2) == HIGH && !dio2Fired) {
+                dio2Fired = true;  dio2Ms = millis() - t0;
+            }
+            if (dio1Fired && dio2Fired) break;
+        }
+        Serial.printf("  [INFO] startTransmit=%d\n", s);
+        Serial.printf("  [INFO] DIO1 fired=%d @%lu ms   DIO2 fired=%d @%lu ms\n",
+                      dio1Fired ? 1 : 0, (unsigned long)dio1Ms,
+                      dio2Fired ? 1 : 0, (unsigned long)dio2Ms);
+        if (dio2Fired && !dio1Fired) {
+            Serial.println("  [INFO] Pin swap: TxDone shows up on DIO2 line, "
+                           "not DIO1. Remap PIN_LORA_DIO1 to GPIO 12.");
+        }
+        result("[Q] At least one DIO line fires (TxDone reaches a pin)",
+               dio1Fired || dio2Fired);
+    } else {
+        result("[Q] DIO swap test (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [R] DIO1 line connectivity probe.
+    // With the SX1280 in standby (DIO outputs LOW when no IRQ active),
+    // configure GPIO 11 as INPUT_PULLUP, then INPUT_PULLDOWN, and read.
+    // If both reads follow the pull (pullup=1, pulldown=0), the line
+    // is electrically open -> GPIO 11 is not connected to anything,
+    // confirming a PCB / pin-map fault.
+    // If both reads are 0 regardless of pull, the chip is actively
+    // driving DIO1 LOW (so the trace IS connected) and the [M] failure
+    // must be a mask config issue, not wiring.
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [R] DIO1 connectivity probe (SX1280 in standby) ---");
+    if (radioOk) {
+        radio.standby();
+        radio.clearIrqFlags(0xFFFFFFFFu);
+        delay(5);
+        pinMode(PIN_LORA_DIO1, INPUT_PULLUP);
+        delay(2);
+        int dio1Up = digitalRead(PIN_LORA_DIO1);
+        pinMode(PIN_LORA_DIO1, INPUT_PULLDOWN);
+        delay(2);
+        int dio1Dn = digitalRead(PIN_LORA_DIO1);
+        pinMode(PIN_LORA_DIO1, INPUT);
+
+        Serial.printf("  [INFO] DIO1 with pullup=%d  pulldown=%d\n",
+                      dio1Up, dio1Dn);
+        if (dio1Up == HIGH && dio1Dn == LOW) {
+            Serial.println("  [INFO] DIO1 floats -> GPIO 11 is NOT connected "
+                           "to the SX1280 DIO1 pad. PCB issue.");
+        } else if (dio1Up == LOW && dio1Dn == LOW) {
+            Serial.println("  [INFO] DIO1 forced LOW by SX1280 -> trace is "
+                           "connected. The IRQ-to-DIO mask is wrong.");
+        } else {
+            Serial.println("  [INFO] DIO1 reads inconsistent - check probe.");
+        }
+        // A "good" outcome here is the SX1280 holding the line LOW.
+        result("[R] DIO1 line is driven by SX1280 (not floating)",
+               dio1Up == LOW && dio1Dn == LOW);
+    } else {
+        result("[R] DIO1 connectivity (skipped - radio failed)", false);
+    }
+
+    // -------------------------------------------------------------------
+    // [S] Polling-based TX workaround.
+    // Bypass DIO1 entirely: call startTransmit(), poll the SX1280's
+    // IRQ status register for the TxDone bit, then finishTransmit().
+    // If this returns OK 5 times in a row, we have a firmware
+    // workaround that doesn't depend on DIO1 being wired/configured.
+    // -------------------------------------------------------------------
+    Serial.println("\n--- [S] Polling-based TX (no DIO1) x5 ---");
+    if (radioOk) {
+        int okCount = 0;
+        for (int i = 0; i < 5; ++i) {
+            radio.standby();
+            radio.clearIrqFlags(0xFFFFFFFFu);
+            String msg = "POLL_" + String(i);
+            int s = radio.startTransmit(msg);
+            if (s != RADIOLIB_ERR_NONE) {
+                Serial.printf("  [INFO] iter %d: startTransmit=%d\n", i, s);
+                continue;
+            }
+            uint32_t t0 = millis();
+            bool done = false;
+            uint32_t tDone = 0;
+            while (millis() - t0 < 200) {
+                uint16_t irq = radio.getIrqStatus();
+                if (irq & 0x0001) {
+                    done = true;
+                    tDone = millis() - t0;
+                    break;
+                }
+            }
+            radio.finishTransmit();
+            Serial.printf("  [INFO] iter %d: done=%d  t=%lu ms\n",
+                          i, done ? 1 : 0, (unsigned long)tDone);
+            if (done) okCount++;
+        }
+        Serial.printf("  [INFO] %d/5 polled transmits completed\n", okCount);
+        result("[S] All 5 polled transmits complete", okCount == 5);
+    } else {
+        result("[S] polled TX (skipped - radio failed)", false);
     }
 
     // -------------------------------------------------------------------

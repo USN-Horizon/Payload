@@ -2,6 +2,9 @@
 #if USE_LORA
   #include "New/MavlinkFrames.hpp"
 #endif
+#if USE_LAUNCH_GATE && LAUNCH_USE_LIGHT_SLEEP
+  #include "esp_sleep.h"
+#endif
 
 // =============================================================================
 //  App.cpp
@@ -30,6 +33,12 @@ void App::begin() {
 #endif
 #if USE_LORA
   pinMode(PIN_LORA_CS, OUTPUT); digitalWrite(PIN_LORA_CS, HIGH);
+  // Hold the SX1280 in reset until lora_.begin() runs. With RST floating
+  // the chip half-powers itself, leaks onto MISO, and SD.begin() fails
+  // ~75% of boots (proven by test_sd_minimal_prefix: 0/8 with LoRa
+  // connected & RST floating, 8/8 with RST held LOW). RadioLib's begin()
+  // will release this RST and run its own reset sequence later.
+  pinMode(PIN_LORA_RST, OUTPUT); digitalWrite(PIN_LORA_RST, LOW);
 #endif
 #if USE_SD
   pinMode(PIN_SD_CS, OUTPUT);  digitalWrite(PIN_SD_CS, HIGH);
@@ -54,9 +63,13 @@ void App::begin() {
   attachInterrupt(PIN_GEIGER_2, geigerCh2Isr, RISING);
 #endif
 
-  // Bring SPI peripherals up FIRST.  SD.begin() can leave the bus in a state
-  // the InvenSense IMU driver cannot recover from, so we initialise the
-  // sensors and the radio while the bus is still clean, and probe SD last.
+  // Mount SD first, while the SPI bus has not been touched by anything else.
+  // Earlier comment here noted SD.begin() can leave the bus in a state the
+  // InvenSense IMU driver dislikes - that concern only applies when USE_IMU
+  // is enabled (currently 0). If USE_IMU is ever re-enabled and SD-after-IMU
+  // works better there, restore the old order (sensors / radio first).
+  storage_.begin(runId);
+
   sensors_.begin();
 
 #if USE_LORA
@@ -68,7 +81,10 @@ void App::begin() {
   }
 #endif
 
-  storage_.begin(runId);
+  // Sit in low power on the pad until flight begins. Everything below this is
+  // mission work (logging + TX); we don't want it running for hours of weather
+  // hold. No-op when USE_LAUNCH_GATE is disabled or the IMU did not come up.
+  waitForLaunch_();
 
   uint32_t now = millis();
   lastTxCycleMs_    = now;
@@ -79,6 +95,77 @@ void App::begin() {
 #if USE_SERIAL
   Serial.println("[APP] ready. Commands: status | print | clear | new | last");
 #endif
+}
+
+// =============================================================================
+//  waitForLaunch_  -  low-power wait for the start of flight.
+//  Mirrors env:test_lowpower_wake, but reuses Sensors::poll()/lastAccel() so
+//  there is no second copy of the IMU read path.
+// =============================================================================
+void App::waitForLaunch_() {
+#if USE_LAUNCH_GATE
+  // If the accelerometer never initialised we cannot detect launch - skip the
+  // gate rather than block the payload on the pad forever.
+  if (!sensors_.imuOk()) {
+#if USE_SERIAL
+    Serial.println("[GATE] IMU not available - skipping launch gate");
+#endif
+    return;
+  }
+
+  const int32_t threshSq =
+      static_cast<int32_t>(LAUNCH_THRESHOLD_MG) * LAUNCH_THRESHOLD_MG;
+
+#if USE_SERIAL
+  Serial.printf("[GATE] LOW-POWER WAIT (light_sleep=%d): need |a| > %ld mg "
+                "for %u samples\n",
+                LAUNCH_USE_LIGHT_SLEEP, static_cast<long>(LAUNCH_THRESHOLD_MG),
+                LAUNCH_CONFIRM_SAMPLES);
+#endif
+
+  uint8_t  aboveCount = 0;
+  uint32_t checks     = 0;
+  for (;;) {
+    // Idle the core for one interval while the accel keeps sampling.
+#if LAUNCH_USE_LIGHT_SLEEP
+    esp_sleep_enable_timer_wakeup(
+        static_cast<uint64_t>(LAUNCH_CHECK_INTERVAL_MS) * 1000ULL);
+    esp_light_sleep_start();
+#else
+    delay(LAUNCH_CHECK_INTERVAL_MS);
+#endif
+
+    uint32_t now = millis();
+    sensors_.poll(now);
+    AccelReading a = sensors_.lastAccel();
+    if (!a.ok) continue;          // A failed read must not strand us here.
+    checks++;
+
+    // Compare squared magnitude to avoid a sqrt (and any float) in the loop.
+    int32_t magSq = static_cast<int32_t>(a.x_mg) * a.x_mg
+                  + static_cast<int32_t>(a.y_mg) * a.y_mg
+                  + static_cast<int32_t>(a.z_mg) * a.z_mg;
+
+    if (magSq > threshSq) {
+      if (++aboveCount >= LAUNCH_CONFIRM_SAMPLES) break;
+    } else if (aboveCount > 0) {
+      // Tolerate brief dips so a noisy-but-sustained burn still trips while a
+      // lone knock (+1 then -1) never accumulates.
+      aboveCount--;
+    }
+#if USE_SERIAL
+    // Occasional heartbeat so we can see it is alive without spamming.
+    if (checks % 25 == 0) {
+      Serial.printf("[GATE] waiting... (above %u/%u)\n",
+                    aboveCount, LAUNCH_CONFIRM_SAMPLES);
+    }
+#endif
+  }
+
+#if USE_SERIAL
+  Serial.println("[GATE] FLIGHT DETECTED - starting mission");
+#endif
+#endif // USE_LAUNCH_GATE
 }
 
 // =============================================================================
