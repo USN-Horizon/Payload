@@ -13,11 +13,19 @@
 //  IRQ register over SPI works regardless of how those pins are wired.
 // =============================================================================
 
-constexpr uint32_t LORA_TX_TIMEOUT_MS = 1000;  // upper bound on TX-on-air time.
+constexpr uint32_t LORA_TX_TIMEOUT_MS = 3000;  // upper bound on TX-on-air time.
+                                               // A ~40-byte frame at SF11 /
+                                               // BW 203.125 is ~1 s on air; 1000
+                                               // here would flag every healthy
+                                               // TX as a timeout.
 constexpr uint16_t SX128X_IRQ_TX_DONE = 0x0001;
 
 LoraTx::LoraTx()
-  : mod_(new Module(PIN_LORA_CS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY,
+  // DIO1 is RADIOLIB_NC: GPIO11 is not actually the chip's DIO1 on this board,
+  // it is the antenna-switch control line "CXT" (and GPIO12 is "CrX"). We poll
+  // the IRQ register for TxDone (txBlockOnIrq) instead of the DIO1 pin, and we
+  // drive CXT/CrX ourselves in begin() to select the TX antenna path.
+  : mod_(new Module(PIN_LORA_CS, RADIOLIB_NC, PIN_LORA_RST, PIN_LORA_BUSY,
                     SPI, SPISettings(8000000, MSBFIRST, SPI_MODE0))),
     radio_(mod_) {}
 
@@ -68,6 +76,15 @@ bool LoraTx::begin() {
   digitalWrite(PIN_LORA_PWR, HIGH);
   delay(10);
 
+  // Select the TX antenna path on the RF switch. CXT=GPIO11, CrX=GPIO12 are the
+  // switch control lines (mislabelled DIO1/DIO2). CXT=HIGH, CrX=LOW is the true
+  // TX path, measured with the PA properly biased (test_lora_rfswitch_burst,
+  // 2026-07-06: ~-29 dBm vs ~-47 for the old LOW/HIGH state, which was the RX
+  // branch and only looked best in earlier leakage-based tests). The payload
+  // only transmits, so we hold this state for the whole flight.
+  pinMode(PIN_LORA_DIO1, OUTPUT); digitalWrite(PIN_LORA_DIO1, HIGH);  // CXT
+  pinMode(PIN_LORA_DIO2, OUTPUT); digitalWrite(PIN_LORA_DIO2, LOW);   // CrX
+
 #if USE_SERIAL
   Serial.println("[LoRa] begin");
 #endif
@@ -86,7 +103,7 @@ bool LoraTx::begin() {
   if (radio_.setCodingRate(LORA_CR)             != RADIOLIB_ERR_NONE) return false;
   if (radio_.setOutputPower(LORA_TX_PWR)        != RADIOLIB_ERR_NONE) return false;
 
-  radio_.setCRC(true);
+  radio_.setCRC(1);
   radio_.setWhitening(true);
 
   ready_ = true;
@@ -158,6 +175,19 @@ size_t LoraTx::service(uint8_t maxAttemptsThisTick) {
   }
 
   return did;
+}
+
+// =============================================================================
+//  sleep / wake  -  retention sleep between pad beacons.
+// =============================================================================
+bool LoraTx::sleep() {
+  if (!ready_) return false;
+  return radio_.sleep(/*retainConfig=*/true) == RADIOLIB_ERR_NONE;
+}
+
+bool LoraTx::wake() {
+  if (!ready_) return false;
+  return radio_.standby() == RADIOLIB_ERR_NONE;
 }
 
 // =============================================================================

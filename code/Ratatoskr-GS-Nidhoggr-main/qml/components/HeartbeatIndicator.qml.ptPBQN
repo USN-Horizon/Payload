@@ -1,0 +1,51 @@
+import QtQuick
+import QtQuick.Layouts
+
+// Small indicator that should change color based on how long ago a board's
+// last heartbeat arrived. Bind `model` to avionicsHeartbeatM or
+// payloadHeartbeatM (context properties set up in main.cpp) or any other
+// HeartbeatModel instance.
+//
+// HeartbeatModel exposes:
+//   lastBeatMs: epoch ms (QDateTime::currentMSecsSinceEpoch()) of the most
+//               recent heartbeat, or -1 if none has arrived yet.
+//               NOTIFY'd, so it updates live as beats come in.
+ColumnLayout {
+    id: heartbeatRoot
+    required property QtObject model
+
+    Text {
+        id: lastBeatText
+        color: "#ffffff"
+    }
+
+    Rectangle {
+        id: root
+
+        width: 32
+        height: 32
+        radius: width / 2
+
+        // Ticks continuously (not just when a new beat arrives) so the
+        // indicator can keep aging between beats. 33ms matches the ~30fps
+        // redraw rate RealtimeGraph.qml already uses elsewhere in the app for
+        // this kind of continuously-updating visual.
+        Timer {
+        interval: 33
+        running: true
+        repeat: true
+        onTriggered: {
+            if (heartbeatRoot.model.lastBeatMs === -1) return;
+            let elapsed = (Date.now() - heartbeatRoot.model.lastBeatMs) / 1000;
+            if (elapsed>10) lastBeatText.text = elapsed + "s ago"; else lastBeatText.text = "";
+            let badFactor = Math.min(255, Math.floor((elapsed / 10) * 256));
+            let hexR = badFactor.toString(16).padStart(2, '0');
+            let hexG = (255-badFactor).toString(16).padStart(2, '0');
+            root.color = "#" + hexR + hexG + "00";
+        }
+        }
+    }
+
+}
+
+
