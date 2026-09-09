@@ -1,0 +1,8 @@
+# Need's to be done
+
+- temp trothel for the lora. Endre setings (mest sansynlig volt) for å få tempraturnt til å synke og ikke gå over 85 grader C.
+- Kansje endre ossen geiger ting ser kalkulert
+
+# Fungerer ikke nå
+
+- den vet ikke når den for sendt eller ikke sendt.

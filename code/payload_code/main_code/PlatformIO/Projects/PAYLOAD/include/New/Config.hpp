@@ -29,7 +29,7 @@
 #define USE_BARO       1   // BMP388 barometer.
 #define USE_MAG        1   // BMM350 magnetometer.
 #define USE_LORA_TEMP  1   // TMP1075 temperature sensor next to LoRa module.
-#define USE_LORA_VOLT  1   // DAC43401 voltage setting that drives LoRa TX power.
+#define USE_LORA_VOLT  0   // DAC43401 voltage setting that drives LoRa TX power.
 
 // -----------------------------------------------------------------------------
 //  Conditional library includes.
@@ -127,7 +127,7 @@ constexpr uint8_t MAV_COMPID  = 191;         // Component ID for "scientific pay
 // -----------------------------------------------------------------------------
 //  Timing.
 // -----------------------------------------------------------------------------
-constexpr uint32_t TX_CYCLE_INTERVAL_MS    = 10000; // One TX cycle / 10 s.
+constexpr uint32_t TX_CYCLE_INTERVAL_MS    = 2500; // One TX cycle / 10 s.
                                                     // At SF11 / BW 203.125 each packet is
                                                     // ~0.8-1.1 s on air (4x slower than at
                                                     // BW 812.5), so a full ~8-packet cycle
@@ -171,7 +171,7 @@ constexpr uint32_t HEARTBEAT_INTERVAL_MS   = 5000;  // MAVLink heartbeat cadence
 constexpr int32_t  LAUNCH_THRESHOLD_MG      = 1500; // > resting ~1000 mg.
 constexpr uint8_t  LAUNCH_CONFIRM_SAMPLES   = 1;    // Sustained, not a tap.
 constexpr uint32_t LAUNCH_CHECK_INTERVAL_MS = 200;  // 5 Hz duty cycle.
-constexpr uint32_t PAD_BEACON_INTERVAL_MS   = 10000; // On-pad heartbeat cadence.
+constexpr uint32_t PAD_BEACON_INTERVAL_MS   = 1000; // On-pad heartbeat cadence.
 
 // -----------------------------------------------------------------------------
 //  LoRa retry queue. If a frame fails to transmit it is pushed onto the queue
