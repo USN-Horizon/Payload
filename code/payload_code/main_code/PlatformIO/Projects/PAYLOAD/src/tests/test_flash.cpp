@@ -35,7 +35,7 @@ void setup() {
     result("LittleFS mount", mounted);
 
     if (!mounted) {
-        Serial.println("  [HINT] Flash partition may be missing from partitions.csv.");
+        Serial.println("  [HINT] No SPIFFS/LittleFS partition in the partition table (board_build.partitions).");
         goto done;
     }
 

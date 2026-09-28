@@ -29,7 +29,9 @@ static constexpr uint8_t DAC_ADDR_FALLBACK = 0x47;   // also ACKs on this board
 
 // DAC43401 register map
 static constexpr uint8_t DAC_REG_STATUS        = 0x01;
-static constexpr uint8_t DAC_REG_GENERAL_CFG   = 0x09;
+static constexpr uint8_t DAC_REG_GENERAL_CFG   = 0xD1;   // NOT 0x09: that register does
+                                                          // not exist, the old value left
+                                                          // the DAC in power-down.
 static constexpr uint8_t DAC_REG_DAC_DATA      = 0x21;
 static constexpr uint8_t DAC_REG_DEVICE_UNLOCK = 0x36;
 static constexpr uint16_t DAC_UNLOCK_MAGIC     = 0x5000;

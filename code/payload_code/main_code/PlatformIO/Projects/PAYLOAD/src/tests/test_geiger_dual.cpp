@@ -1,11 +1,12 @@
 // Component test: Geiger Counter, BOTH channels
 //
-// test_geiger only ever verified CRD1 on GPIO 8. Production (env:new) also
-// counts CRD2 on GPIO 3 (IF12, from the board PDF) which has never been
-// hardware-verified — and GPIO 3 is an ESP32-S3 strapping pin, so the PDF
-// being wrong here would silently zero the second channel in flight logs.
-// This test counts both channels side by side and reports per-channel rates
-// every 10 s so a mismatch (one channel silent) is obvious.
+// Both flight firmwares count CRD1 on GPIO 8 and CRD2 on GPIO 3 (IF11 /
+// IF12). GPIO 3 is an ESP32-S3 strapping pin, so a wiring mistake there would
+// silently zero the second channel; both channels were seen counting on the
+// full stack on 2026-09-28. This test counts both channels side by side and
+// reports per-channel rates every 10 s so a mismatch (one channel silent) is
+// obvious. The CRD board output idles HIGH and pulses LOW; the RISING edge
+// (end of the pulse) is counted, same as in the flight firmware.
 //
 // PASS criteria per window:
 //   - Both channels see pulses (tube powered + background/source present).
@@ -16,8 +17,8 @@
 
 #include <Arduino.h>
 
-static constexpr int GEIGER_PIN_1 = 8;  // CRD1, IF11 
-static constexpr int GEIGER_PIN_2 = 3;  // CRD2, IF12 
+static constexpr int GEIGER_PIN_1 = 8;  // CRD1, IF11
+static constexpr int GEIGER_PIN_2 = 3;  // CRD2, IF12
 
 static volatile uint32_t count1 = 0;
 static volatile uint32_t count2 = 0;

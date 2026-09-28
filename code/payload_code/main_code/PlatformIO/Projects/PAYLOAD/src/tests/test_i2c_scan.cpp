@@ -4,8 +4,8 @@
 // at both 100 kHz and 400 kHz, prints which addresses ACK, and labels
 // the chips that are expected on this board.
 //
-// Specifically calls out 0x72 (the breakout PDF claims DAC43401 lives
-// there; in practice it has been observed at 0x48).
+// Specifically calls out 0x72 (the board document says the DAC43401 lives
+// there; it answers at 0x48, and the TMP1075 at 0x49 instead of 0x73).
 //
 // Upload:  pio run -e test_i2c_scan -t upload
 // Monitor: pio device monitor -e test_i2c_scan
@@ -100,7 +100,7 @@ void setup() {
 
     detailedList(100000);
 
-    // Targeted probe of 0x72 since the user is specifically checking for it.
+    // Targeted probe of 0x72, the DAC43401 address the board document gives.
     Serial.println("\n--- Targeted probe: 0x72 ---");
     Wire.setClock(100000);
     Wire.beginTransmission(0x72);

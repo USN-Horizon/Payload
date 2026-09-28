@@ -1,11 +1,12 @@
 // Component test: TMP1075 temperature sensor (next to the LoRa module)
 //
-// The TMP1075 sits on I2C address 0x73. It exposes a 16-bit temperature
+// The TMP1075 answers on I2C address 0x49 (the board document says 0x73,
+// which is wrong). It exposes a 16-bit temperature
 // register at pointer 0x00; the upper 12 bits are a signed two's-complement
 // reading with 0.0625 °C / LSB, and the lower 4 bits are reserved (zero).
 //
 // PASS criteria:
-//   - 0x73 ACKs on the I2C bus
+//   - 0x49 ACKs on the I2C bus
 //   - Two bytes can be read from register 0x00
 //   - Temperature is in the 5 – 60 °C range (sane room / payload bench temp)
 //
@@ -71,11 +72,11 @@ void setup() {
     result("I2C bus initialized (SDA=7, SCL=15)", true);
     i2cScan();
 
-    // Probe address 0x73 directly so the user gets a clear PASS/FAIL.
+    // Probe address 0x49 directly so the user gets a clear PASS/FAIL.
     Wire.beginTransmission(TMP1075_ADDR);
     bool present = (Wire.endTransmission() == 0);
     Serial.printf("  [INFO] 0x%02X ACK = %s\n", TMP1075_ADDR, present ? "yes" : "no");
-    result("TMP1075 present at 0x73", present);
+    result("TMP1075 present at 0x49", present);
 
     if (!present) {
         Serial.println("  [HINT] Check: TMP1075 is populated on the LoRa side, SDA=7, SCL=15, power.");

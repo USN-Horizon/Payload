@@ -14,10 +14,11 @@
 // ------------------------
 // At rest the accel magnitude is ~1.0 g (just gravity). A launch adds thrust on
 // top of gravity, so the magnitude climbs to several g and STAYS there for the
-// burn. We therefore declare launch only when the magnitude is above
-// LAUNCH_THRESHOLD_G for LAUNCH_CONFIRM_SAMPLES samples in a row. That debounce
-// rejects one-off knocks/handling on the pad (a tap spikes for a single sample,
-// a launch does not). The exact threshold is not critical — anything clearly
+// burn. Launch is declared when the magnitude is above LAUNCH_THRESHOLD_G for
+// LAUNCH_CONFIRM_SAMPLES samples in a row. With 1 (the flight setting, so a
+// bench shake trips it too) the first sample above the threshold is enough;
+// raising it rejects one-off knocks (a tap spikes for a single sample, a
+// launch does not). The exact threshold is not critical — anything clearly
 // above resting gravity works.
 //
 // Low power
@@ -41,7 +42,7 @@
 #include <math.h>
 #include "esp_sleep.h"
 
-// ---- Wiring (from "Main board.pdf" pin table) -------------------------------
+// ---- Wiring (from the "Main board testing.docx" pin table) ------------------
 static constexpr int PIN_SPI_SCK  = 5;
 static constexpr int PIN_SPI_MISO = 6;
 static constexpr int PIN_SPI_MOSI = 4;
@@ -63,8 +64,8 @@ static constexpr uint16_t ACCEL_FSR_G    = 16;    // ±16 g so launch never clip
 static constexpr float    ACCEL_LSB_PER_G = 32768.0f / ACCEL_FSR_G;  // ≈ 2048
 
 static constexpr float    LAUNCH_THRESHOLD_G   = 1.5f;  // Above resting ~1 g.
-static constexpr uint8_t  LAUNCH_CONFIRM_SAMPLES = 1;   // Sustained, not a tap.
-static constexpr uint32_t WAIT_CHECK_INTERVAL_MS = 200; // 5 Hz duty cycle.
+static constexpr uint8_t  LAUNCH_CONFIRM_SAMPLES = 1;   // 1 = first sample trips (as Config.hpp); >1 rejects taps.
+static constexpr uint32_t WAIT_CHECK_INTERVAL_MS = 200; // Check 5 times a second.
 
 static void result(const char* label, bool pass) {
     Serial.printf("  [%s] %s\n", pass ? "PASS" : "FAIL", label);

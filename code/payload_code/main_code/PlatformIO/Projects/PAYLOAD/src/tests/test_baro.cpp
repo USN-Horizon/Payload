@@ -1,4 +1,5 @@
-// Component test: BMP388 Barometer  (design says BMP388, actual board has BMP388)
+// Component test: BMP388 barometer (the schematic says BMP390L; the fitted
+// chip reports id 0x50 = BMP388; the driver handles both)
 //
 // Verifies I2C communication, chip initialisation, and plausible readings.
 //

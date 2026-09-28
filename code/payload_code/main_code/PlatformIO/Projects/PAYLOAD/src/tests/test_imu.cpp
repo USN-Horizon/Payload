@@ -1,9 +1,11 @@
 // Component test: ICM-45686 IMU (accelerometer + gyroscope)
 //
-// Verifies I2C communication, chip initialisation, and plausible sensor data.
+// Verifies SPI communication, chip initialisation, and plausible sensor data
+// (register reads; the FIFO path of Stack_without_LoRa is covered by
+// test_sensors_fifo).
 //
 // PASS criteria:
-//   - IMU found on I2C bus
+//   - IMU answers on SPI (CS = GPIO16)
 //   - begin() returns 0
 //   - Accel magnitude 0.5 – 2.0 g  (gravity shows on at least one axis)
 //   - Gyro magnitude < 50 dps when the board is held still
@@ -41,7 +43,7 @@ void setup() {
     int initState = imu.begin();
     Serial.printf("  [INFO] imu.begin() = %d  (0 = OK)\n", initState);
     bool initOk = (initState == 0);
-    result("IMU begin() – I2C comms + chip ID", initOk);
+    result("IMU begin() - SPI comms + chip ID", initOk);
 
     if (!initOk) {
         Serial.println("  [HINT] Check: SPI wiring SCK=5, MISO=6, MOSI=4, CS=16(IF8), power.");
@@ -63,8 +65,8 @@ void setup() {
 
         if (readOk) {
             // accel_data / gyro_data are RAW int16 counts at the configured
-            // FSR (NOT float g / dps).  Convert with the same scaling used
-            // by Sensors.cpp in the new firmware.
+            // FSR (NOT float g / dps).  Convert with the same scaling as
+            // Stack_with_LoRa/Sensors.cpp.
             constexpr float ACCEL_FSR_G  = 16.0f;     // matches startAccel(100, 16)
             constexpr float GYRO_FSR_DPS = 2000.0f;   // matches startGyro(100, 2000)
             constexpr float ACCEL_LSB_PER_G   = 32768.0f / ACCEL_FSR_G;   // ≈ 2048

@@ -1,8 +1,26 @@
-# Need's to be done
+# Open items
 
-- temp trothel for the lora. Endre setings (mest sansynlig volt) for å få tempraturnt til å synke og ikke gå over 85 grader C.
-- Kansje endre ossen geiger ting ser kalkulert
+- Range test with the new packet layout: 64-byte packets are ~5x longer on
+  the air than the old 20-byte ones, so packet loss at the range limit will
+  be higher per packet. Use env:test_lora_range on the payload (counter in
+  the "radiation" value) and the ground station to count losses at distance.
+  LORA_PACKET_LEN can be lowered (e.g. 48) at the cost of one more packet
+  per cycle.
 
-# Fungerer ikke nå
+- Flight check of the LoRa thermal thresholds (Config.hpp LORA_THERMAL_LEVELS):
+  on the desk the stack idles at ~55 C and settles at 66-68 C while
+  transmitting. Inside the airframe on battery it may run hotter or cooler;
+  adjust L1/L2 from the LoRa_Temp_cC column of the SD rows.
 
-- den vet ikke når den for sendt eller ikke sendt.
+- The 30 min flight stop (FLIGHT_MAX_DURATION_S): a parachute descent from
+  9 km can take 20-30 min. Check the expected descent time against it.
+
+- Geiger: decide whether the per-cycle count (COSMIC_RADIATION) should be
+  calculated differently (per tube, per minute, ...). The SD rows have both
+  channels; Stack_without_LoRa logs every single pulse with a timestamp.
+
+- Stack_without_LoRa: bench-test the SD-dead fallback (pull the card while
+  running) and launch detection by shaking; neither has been exercised.
+
+- Local ground_station/include/config.h says 2403 MHz; the reference adapter
+  in Avionics-main says 2400 MHz (which the payload uses).

@@ -4,7 +4,8 @@
 //
 // PASS criteria:
 //   - begin() returns 0
-//   - Total field magnitude 5 – 100 µT  (Earth field is ~25 – 65 µT)
+//   - Total field magnitude 5 – 150 µT  (Earth field ~50 µT in Norway; the
+//     stack's own electronics add to it, ~85-115 µT seen on the bench)
 //
 // Upload:  pio run -e test_mag -t upload
 // Monitor: pio device monitor -e test_mag
